@@ -1,0 +1,14 @@
+node_modules/
+.next/
+logs/
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+tsconfig.tsbuildinfo
+outputs/
+.venv/
+.mypy_cache/
+.ruff_cache/
+dist/

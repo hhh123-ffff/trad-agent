@@ -1,0 +1,10 @@
+{
+  "name": "MarketLens 盘面助手",
+  "short_name": "MarketLens",
+  "description": "A股盘前参考与盘后复盘 SaaS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f3ec",
+  "theme_color": "#0f5f57",
+  "icons": []
+}

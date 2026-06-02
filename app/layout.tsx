@@ -1,0 +1,22 @@
+import type { ReactNode } from "react";
+import "./globals.css";
+
+export const metadata = {
+  title: "MarketLens 盘面助手",
+  description: "A股盘前参考与盘后复盘 SaaS",
+  manifest: "/manifest.json"
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#f7f3ec"
+};
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="zh-CN">
+      <body>{children}</body>
+    </html>
+  );
+}
