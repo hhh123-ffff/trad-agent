@@ -4,7 +4,13 @@ import os
 from datetime import date, datetime, timedelta
 from typing import Callable
 
-from .data_providers import market_data_provider, news_announcement_provider
+from .data_providers import (
+    history_provider_sources,
+    information_provider_sources,
+    market_data_provider,
+    market_provider_sources,
+    news_announcement_provider,
+)
 from .database import get_redis
 from .market_provider import CN_TZ
 from .models import DailyTrackingReport, JobRun, MarketEvent, MarketSnapshot
@@ -113,14 +119,7 @@ def build_daily_tracking_report(trading_day: date | None = None) -> DailyTrackin
         _watchlist_observation_section(latest_snapshot, observations, candidates),
         _data_quality_section(snapshots, events, news, announcements, data_warnings),
     ]
-    source_ids = sorted(
-        {
-            *(snapshot.source_id for snapshot in snapshots),
-            *(source_id for event in events for source_id in event.source_ids),
-            *(item.source_id for item in news),
-            *(item.source_id for item in announcements),
-        }
-    )
+    source_ids = _daily_report_source_ids(snapshots, events, news, announcements)
     report = DailyTrackingReport(
         trading_day=day,
         generated_at=datetime.now(CN_TZ),
@@ -138,6 +137,29 @@ def build_daily_tracking_report(trading_day: date | None = None) -> DailyTrackin
 
 def _has_mvp_report_sections(sections: list[dict[str, object]]) -> bool:
     return [str(section.get("title") or "") for section in sections] == REPORT_SECTION_TITLES
+
+
+def _configured_source_ids() -> list[str]:
+    return [
+        source.id
+        for source in [
+            *market_provider_sources(),
+            *history_provider_sources(),
+            *information_provider_sources(),
+        ]
+    ]
+
+
+def _daily_report_source_ids(snapshots: list[MarketSnapshot], events: list[MarketEvent], news, announcements) -> list[str]:
+    return sorted(
+        {
+            *_configured_source_ids(),
+            *(snapshot.source_id for snapshot in snapshots),
+            *(source_id for event in events for source_id in event.source_ids),
+            *(item.source_id for item in news),
+            *(item.source_id for item in announcements),
+        }
+    )
 
 
 def _report_section(
@@ -331,14 +353,7 @@ def _watchlist_observation_section(latest_snapshot: MarketSnapshot | None, obser
 
 def _data_quality_section(snapshots: list[MarketSnapshot], events: list[MarketEvent], news, announcements, data_warnings: list[str]) -> dict[str, object]:
     latest_snapshot = snapshots[-1] if snapshots else None
-    source_ids = sorted(
-        {
-            *(snapshot.source_id for snapshot in snapshots),
-            *(source_id for event in events for source_id in event.source_ids),
-            *(item.source_id for item in news),
-            *(item.source_id for item in announcements),
-        }
-    )
+    source_ids = _daily_report_source_ids(snapshots, events, news, announcements)
     evidence = [
         f"最新快照时间 {latest_snapshot.captured_at.isoformat()}" if latest_snapshot else "暂无快照时间",
         f"来源标识：{', '.join(source_ids) if source_ids else '暂无'}",

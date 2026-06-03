@@ -1,6 +1,11 @@
 from datetime import date
 
-from backend.app.data_providers import TonghuashunDelayedHistoryProvider, TushareNewsAnnouncementProvider, data_source_statuses
+from backend.app.data_providers import (
+    TonghuashunDelayedHistoryProvider,
+    TushareNewsAnnouncementProvider,
+    data_source_statuses,
+    history_provider_sources,
+)
 from backend.app.history_provider import HistoryDataUnavailable
 from backend.app.models import DailyBar
 from backend.app.ths_provider import TonghuashunQuantApiClient
@@ -228,6 +233,19 @@ def test_tonghuashun_history_provider_falls_back_to_akshare():
     provider = TonghuashunDelayedHistoryProvider(client=BrokenClient(), fallback=Fallback(), allow_bar_fallback=True)
 
     assert provider.daily_bars("600000.SH")[0].symbol == "600000.SH"
+
+
+def test_tonghuashun_history_sources_omit_akshare_when_akshare_fallbacks_disabled(monkeypatch):
+    monkeypatch.setenv("THS_HISTORY_FALLBACK_TO_AKSHARE", "0")
+    monkeypatch.setenv("THS_THEME_FALLBACK_TO_AKSHARE", "0")
+    monkeypatch.setattr(
+        "backend.app.data_providers.history_data_provider",
+        TonghuashunDelayedHistoryProvider(),
+    )
+
+    source_ids = [source.id for source in history_provider_sources()]
+
+    assert source_ids == ["src-ths-quantapi-delayed"]
 
 
 def test_tonghuashun_data_source_status_marks_missing_credentials(monkeypatch):

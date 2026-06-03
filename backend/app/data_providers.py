@@ -547,7 +547,12 @@ def build_history_data_provider() -> HistoryDataProvider:
 
 def history_provider_sources() -> list[SourceRef]:
     if isinstance(history_data_provider, TonghuashunDelayedHistoryProvider):
-        return [ths_delayed_source(), akshare_source()]
+        sources = [ths_delayed_source()]
+        history_fallback_enabled = os.getenv("THS_HISTORY_FALLBACK_TO_AKSHARE", "1").strip() != "0"
+        theme_fallback_enabled = os.getenv("THS_THEME_FALLBACK_TO_AKSHARE", "1").strip() != "0"
+        if history_fallback_enabled or theme_fallback_enabled:
+            sources.append(akshare_source())
+        return sources
     return [history_data_provider_source()]
 
 

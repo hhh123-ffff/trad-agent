@@ -669,6 +669,7 @@ def test_tracking_daily_report_without_snapshots_marks_data_gaps():
         assert report.status_code == 200
         payload = report.json()
         assert payload["snapshots"] == []
+        assert payload["source_ids"]
         assert "快照不足，分析置信度低" in payload["headline"]
         _assert_daily_report_mvp_shape(payload)
         _assert_daily_report_compliance(payload)
