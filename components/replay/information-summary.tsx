@@ -25,7 +25,7 @@ export function InformationSummaryPanel({ trackingDaily }: { trackingDaily?: Dai
   const symbolBuckets = buildSymbolBuckets(items);
 
   return (
-    <section className="mt-5 rounded-lg border border-ink/10 bg-paper/60 p-4">
+    <section className="rounded-lg border border-ink/10 bg-paper/60 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold text-pine">消息统计</p>

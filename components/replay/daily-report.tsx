@@ -20,7 +20,7 @@ export function DailyReportCard({
   }
 
   return (
-    <div className="mt-5 border-t border-ink/10 pt-5">
+    <section className="panel rounded-lg p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-xs font-semibold text-pine">每日市场分析报告</p>
@@ -40,7 +40,7 @@ export function DailyReportCard({
           <DailyReportSection key={section.title} section={section} />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -96,7 +96,7 @@ function DailyReportSection({ section }: { section: DailyTrackingReport["section
 
 function DailyReportUnavailable({ error, jobRuns }: { error?: string; jobRuns: JobRun[] }) {
   return (
-    <div className="mt-5 border-t border-ink/10 pt-5">
+    <section className="panel rounded-lg p-5">
       <div className="rounded-lg border border-saffron/30 bg-saffron/10 p-4">
         <div className="flex items-center gap-2 text-[#8a5a12]">
           <AlertTriangle size={17} />
@@ -108,7 +108,7 @@ function DailyReportUnavailable({ error, jobRuns }: { error?: string; jobRuns: J
         {error && <p className="mt-3 break-words rounded-md border border-danger/15 bg-white px-3 py-2 text-xs leading-5 text-danger">{error}</p>}
       </div>
       <TrackingJobStrip jobRuns={jobRuns} />
-    </div>
+    </section>
   );
 }
 
