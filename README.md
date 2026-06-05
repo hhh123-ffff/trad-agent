@@ -16,6 +16,30 @@ Open `http://127.0.0.1:3000`.
 
 API docs are available at `http://127.0.0.1:8000/docs`.
 
+## Tonghuashun local replay loop
+
+For the post-market replay workflow, start the API in Tonghuashun/iFinD mode:
+
+```bash
+npm run db:up
+npm run api:ths
+npm run dev
+```
+
+Then run a smoke replay without the bounded full-market scan:
+
+```bash
+npm run smoke:replay
+```
+
+Use this command only after Tonghuashun credentials and database performance are stable enough for candidate scanning:
+
+```bash
+npm run smoke:replay:scan
+```
+
+`api:ths` defaults to pure Tonghuashun mode by setting `THS_HISTORY_FALLBACK_TO_AKSHARE=0` and `THS_THEME_FALLBACK_TO_AKSHARE=0`. Set `THS_REFRESH_TOKEN` or `THS_ACCESS_TOKEN` before running it with real iFinD access. Without credentials, the replay smoke still generates the daily report and marks Tonghuashun sources as data gaps.
+
 ## Verify
 
 ```bash
