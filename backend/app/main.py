@@ -37,6 +37,7 @@ from .models import (
     Confidence,
     DailyTrackingReport,
     DashboardResponse,
+    InformationSummary,
     JobRun,
     MarketEvent,
     MarketSnapshot,
@@ -90,7 +91,7 @@ from .stealth_repository import (
 from .stealth_tasks import enqueue_failed_symbols_retry, enqueue_stealth_scan_task
 from .tracking_repository import list_announcement_items, list_market_events, list_market_snapshots, list_news_items
 from .tracking_scheduler import start_scheduler, stop_scheduler
-from .tracking_service import JOB_SPECS, recent_job_runs, run_tracking_job, tracking_daily_report
+from .tracking_service import JOB_SPECS, build_information_summary, recent_job_runs, run_tracking_job, tracking_daily_report
 
 
 MARKET_CACHE_TTL_SECONDS = 20
@@ -487,6 +488,11 @@ def tracking_events(date: str | None = None, symbol: str | None = None, type: st
 @app.get("/api/tracking/snapshots", response_model=list[MarketSnapshot])
 def tracking_snapshots(date: str | None = None, interval: str = "5m") -> list[MarketSnapshot]:
     return list_market_snapshots(parse_trading_day(date), interval=interval)
+
+
+@app.get("/api/tracking/information-summary", response_model=InformationSummary)
+def tracking_information_summary(date: str | None = None, symbol: str | None = None) -> InformationSummary:
+    return build_information_summary(parse_trading_day(date), symbol=symbol)
 
 
 @app.get("/api/news", response_model=list[NewsItem])

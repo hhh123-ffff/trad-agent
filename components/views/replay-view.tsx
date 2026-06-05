@@ -3,6 +3,7 @@ import { PlayCircle } from "lucide-react";
 import { DataSourceStatusPanel } from "@/components/data-sources/data-source-status";
 import { CandidateFunnel } from "@/components/replay/candidate-funnel";
 import { DailyReportCard } from "@/components/replay/daily-report";
+import { InformationSummaryPanel } from "@/components/replay/information-summary";
 import { PostMarketPipeline } from "@/components/replay/job-pipeline";
 import type { AgentStatusResponse, DailyTrackingReport, JobRun, ObservationSummary, ReplayReport, StealthCandidate } from "@/lib/types";
 
@@ -45,6 +46,7 @@ export function ReplayView({
 
       <PostMarketPipeline jobRuns={jobRuns} />
       <DailyReportCard trackingDaily={trackingDaily} trackingError={trackingError} jobRuns={jobRuns} />
+      <InformationSummaryPanel trackingDaily={trackingDaily} />
 
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[1.05fr_0.95fr]">
         <CandidateFunnel candidates={candidates} observationSummary={observationSummary} />

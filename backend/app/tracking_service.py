@@ -13,7 +13,7 @@ from .data_providers import (
 )
 from .database import get_redis
 from .market_provider import CN_TZ
-from .models import DailyTrackingReport, JobRun, MarketEvent, MarketSnapshot
+from .models import DailyTrackingReport, InformationDigestItem, InformationSummary, InformationSymbolSummary, JobRun, MarketEvent, MarketSnapshot
 from .repositories import list_watchlist
 from .stealth_repository import list_candidates, list_observations, snapshot_observation_journal
 from .stealth_scanner import run_stealth_scan
@@ -85,6 +85,55 @@ def tracking_daily_report(trading_day: date | None = None) -> DailyTrackingRepor
     return build_daily_tracking_report(day)
 
 
+def build_information_summary(trading_day: date | None = None, symbol: str | None = None) -> InformationSummary:
+    day = trading_day or datetime.now(CN_TZ).date()
+    news = list_news_items(day, symbol=symbol)
+    announcements = list_announcement_items(day, symbol=symbol)
+    items = [
+        *_digest_items(news, event_type="news"),
+        *_digest_items(announcements, event_type="announcement"),
+    ]
+    items.sort(key=lambda item: item.published_at, reverse=True)
+    by_importance = {key: 0 for key in ["critical", "high", "medium", "low"]}
+    by_event_type = {"announcement": len(announcements), "news": len(news)}
+    symbol_buckets: dict[str, InformationSymbolSummary] = {}
+
+    for item in items:
+        by_importance[item.importance] = by_importance.get(item.importance, 0) + 1
+        if not item.symbol:
+            continue
+        bucket = symbol_buckets.setdefault(item.symbol, InformationSymbolSummary(symbol=item.symbol))
+        updates = {
+            "total": bucket.total + 1,
+            "news": bucket.news + (1 if item.event_type == "news" else 0),
+            "announcements": bucket.announcements + (1 if item.event_type == "announcement" else 0),
+            "high_importance": bucket.high_importance + (1 if item.importance in {"critical", "high"} else 0),
+            "latest_title": bucket.latest_title,
+            "latest_at": bucket.latest_at,
+        }
+        if bucket.latest_at is None or item.published_at > bucket.latest_at:
+            updates["latest_title"] = item.title
+            updates["latest_at"] = item.published_at
+        symbol_buckets[item.symbol] = bucket.model_copy(update=updates)
+
+    warnings = []
+    if not items:
+        warnings.append("新闻/公告源未接入或当日没有写入数据。")
+    source_ids = sorted({item.source_id for item in items})
+    return InformationSummary(
+        trading_day=day,
+        total_count=len(items),
+        news_count=len(news),
+        announcement_count=len(announcements),
+        by_importance=by_importance,
+        by_event_type=by_event_type,
+        by_symbol=sorted(symbol_buckets.values(), key=lambda item: (item.total, item.high_importance), reverse=True)[:10],
+        latest_items=items[:12],
+        warnings=warnings,
+        source_ids=source_ids,
+    )
+
+
 def build_daily_tracking_report(trading_day: date | None = None) -> DailyTrackingReport:
     day = trading_day or datetime.now(CN_TZ).date()
     snapshots = list_market_snapshots(day)
@@ -137,6 +186,24 @@ def build_daily_tracking_report(trading_day: date | None = None) -> DailyTrackin
 
 def _has_mvp_report_sections(sections: list[dict[str, object]]) -> bool:
     return [str(section.get("title") or "") for section in sections] == REPORT_SECTION_TITLES
+
+
+def _digest_items(items, event_type: str) -> list[InformationDigestItem]:
+    return [
+        InformationDigestItem(
+            id=item.id,
+            symbol=item.symbol,
+            title=item.title,
+            summary=item.summary,
+            published_at=item.published_at,
+            source_url=item.source_url,
+            source_name=item.source_name,
+            event_type=event_type,
+            importance=item.importance,
+            source_id=item.source_id,
+        )
+        for item in items
+    ]
 
 
 def _configured_source_ids() -> list[str]:

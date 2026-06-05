@@ -405,6 +405,42 @@ export interface AnnouncementItem {
   license_note: string;
 }
 
+export interface InformationDigestItem {
+  id: string;
+  symbol: string | null;
+  title: string;
+  summary: string;
+  published_at: string;
+  source_url: string;
+  source_name: string;
+  event_type: "news" | "announcement";
+  importance: Importance;
+  source_id: string;
+}
+
+export interface InformationSymbolSummary {
+  symbol: string;
+  total: number;
+  news: number;
+  announcements: number;
+  high_importance: number;
+  latest_title: string;
+  latest_at: string | null;
+}
+
+export interface InformationSummary {
+  trading_day: string;
+  total_count: number;
+  news_count: number;
+  announcement_count: number;
+  by_importance: Record<string, number>;
+  by_event_type: Record<string, number>;
+  by_symbol: InformationSymbolSummary[];
+  latest_items: InformationDigestItem[];
+  warnings: string[];
+  source_ids: string[];
+}
+
 export interface DailyTrackingReport {
   trading_day: string;
   generated_at: string;

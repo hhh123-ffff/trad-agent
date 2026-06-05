@@ -3,6 +3,7 @@ import type {
   AssistantAnswer,
   DashboardResponse,
   DailyTrackingReport,
+  InformationSummary,
   JobRun,
   MarketEvent,
   MarketSnapshot,
@@ -240,6 +241,14 @@ export async function loadTrackingSnapshots(params?: { date?: string; interval?:
   if (params?.interval) query.set("interval", params.interval);
   const suffix = query.toString() ? `?${query.toString()}` : "";
   return request<MarketSnapshot[]>(`/api/tracking/snapshots${suffix}`);
+}
+
+export async function loadInformationSummary(params?: { date?: string; symbol?: string }) {
+  const query = new URLSearchParams();
+  if (params?.date) query.set("date", params.date);
+  if (params?.symbol) query.set("symbol", params.symbol);
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request<InformationSummary>(`/api/tracking/information-summary${suffix}`);
 }
 
 export async function runAdminJob(jobName: string) {

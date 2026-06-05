@@ -771,3 +771,30 @@ def test_tracking_news_and_announcements_endpoints(monkeypatch):
             assert announcements.json()[0]["source_url"]
     finally:
         _delete_tracking_test_rows()
+
+
+def test_tracking_information_summary_groups_news_and_announcements(monkeypatch):
+    _delete_tracking_test_rows()
+    monkeypatch.setattr(tracking_service, "news_announcement_provider", _FakeNewsAnnouncementProvider())
+    try:
+        with TestClient(app) as client:
+            run = client.post("/api/admin/jobs/run/news_explain")
+            assert run.status_code == 200
+
+            response = client.get(f"/api/tracking/information-summary?date={date.today().isoformat()}")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["trading_day"] == date.today().isoformat()
+        assert payload["total_count"] == 2
+        assert payload["news_count"] == 1
+        assert payload["announcement_count"] == 1
+        assert payload["by_importance"]["medium"] == 2
+        assert payload["by_event_type"] == {"announcement": 1, "news": 1}
+        assert payload["by_symbol"][0]["symbol"] == "600000.SH"
+        assert payload["by_symbol"][0]["total"] == 2
+        assert payload["by_symbol"][0]["announcements"] == 1
+        assert payload["latest_items"][0]["source_id"] in {"src-test-news", "src-test-announcement"}
+        assert not payload["warnings"]
+    finally:
+        _delete_tracking_test_rows()

@@ -509,6 +509,42 @@ class AnnouncementItem(BaseModel):
     license_note: str = "研发源，仅保存标题摘要和链接"
 
 
+class InformationDigestItem(BaseModel):
+    id: str
+    symbol: str | None = None
+    title: str
+    summary: str = ""
+    published_at: datetime
+    source_url: str = ""
+    source_name: str = ""
+    event_type: Literal["news", "announcement"]
+    importance: Literal["critical", "high", "medium", "low"] = "medium"
+    source_id: str
+
+
+class InformationSymbolSummary(BaseModel):
+    symbol: str
+    total: int = 0
+    news: int = 0
+    announcements: int = 0
+    high_importance: int = 0
+    latest_title: str = ""
+    latest_at: datetime | None = None
+
+
+class InformationSummary(BaseModel):
+    trading_day: date
+    total_count: int = 0
+    news_count: int = 0
+    announcement_count: int = 0
+    by_importance: dict[str, int] = Field(default_factory=dict)
+    by_event_type: dict[str, int] = Field(default_factory=dict)
+    by_symbol: list[InformationSymbolSummary] = Field(default_factory=list)
+    latest_items: list[InformationDigestItem] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+
+
 class DailyTrackingReport(BaseModel):
     trading_day: date
     generated_at: datetime
