@@ -1,7 +1,8 @@
 from datetime import date
 
 from backend.app.database import connect, init_schema
-from backend.app.models import StrategyBacktestRequest, StrategySignalOutcome
+from backend.app.models import DailyBar, StockUniverseItem, StrategyBacktestRequest, StrategySignalOutcome
+from backend.app.stealth_repository import save_daily_bars, save_universe_items
 from backend.app.strategy_backtest_repository import (
     create_backtest_run,
     get_backtest_detail,
@@ -10,6 +11,7 @@ from backend.app.strategy_backtest_repository import (
     save_backtest_funnel,
     save_signal_outcomes,
     update_backtest_run,
+    load_backtest_dataset,
 )
 
 
@@ -104,3 +106,32 @@ def test_backtest_repository_keeps_live_signals_separate():
         with connect() as conn:
             conn.execute("DELETE FROM strategy_signal_outcomes WHERE origin = 'live' AND symbol = '600000.SH'")
         _delete_run(run.id)
+
+
+def test_backtest_dataset_excludes_non_mainboard_and_st_symbols():
+    init_schema()
+    items = [
+        StockUniverseItem(symbol="600099.SH", name="主板样本"),
+        StockUniverseItem(symbol="300099.SZ", name="创业板样本"),
+        StockUniverseItem(symbol="688099.SH", name="科创板样本"),
+        StockUniverseItem(symbol="920099.BJ", name="北交所样本"),
+        StockUniverseItem(symbol="600098.SH", name="ST样本", is_st=True),
+    ]
+    bars = [
+        DailyBar(symbol=item.symbol, trade_date=date(2026, 5, 20), open=10, high=11, low=9, close=10)
+        for item in items
+    ]
+    unknown_symbol = "600093.SH"
+    bars.append(DailyBar(symbol=unknown_symbol, trade_date=date(2026, 5, 20), open=10, high=11, low=9, close=10))
+    save_universe_items(items)
+    save_daily_bars(bars)
+    try:
+        dataset = load_backtest_dataset(StrategyBacktestRequest())
+        symbols = {item.symbol for item, _ in dataset}
+        assert "600099.SH" in symbols
+        assert symbols.isdisjoint({"300099.SZ", "688099.SH", "920099.BJ", "600098.SH", unknown_symbol})
+    finally:
+        with connect() as conn:
+            conn.execute("DELETE FROM daily_bars WHERE symbol = ANY(%s)", ([item.symbol for item in items],))
+            conn.execute("DELETE FROM daily_bars WHERE symbol = %s", (unknown_symbol,))
+            conn.execute("DELETE FROM stock_universe WHERE symbol = ANY(%s)", ([item.symbol for item in items],))

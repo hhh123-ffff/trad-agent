@@ -50,7 +50,7 @@ npm run smoke:backtest
 
 ## Strategy quality and backtest workflow
 
-The `#stealth` workspace starts with a strategy-quality audit area. It keeps deterministic historical replay and real post-market signals separate:
+The `#stealth` workspace starts with a strategy-quality audit area. Its stock scope is restricted to Shanghai/Shenzhen mainboard symbols (`600/601/603/605.SH` and `000/001/002/003.SZ`), excluding STAR Market `688`, ChiNext `300/301`, Beijing Stock Exchange, ST, and delisting-risk names. It keeps deterministic historical replay and real post-market signals separate:
 
 - `POST /api/strategy/backtests/run` creates a single-worker local replay task.
 - `GET /api/strategy/backtests/latest` and `GET /api/strategy/backtests/{run_id}` expose persisted status and summary.

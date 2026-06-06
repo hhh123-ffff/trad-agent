@@ -28,7 +28,7 @@ from backend.app.models import (
     ThemeMembership,
     WatchlistItemCreate,
 )
-from backend.app.stealth_repository import create_scan_task, list_candidates, record_scan_failure, save_daily_bars, save_scan_results
+from backend.app.stealth_repository import create_scan_task, list_candidates, record_scan_failure, save_daily_bars, save_scan_results, save_universe_items
 from backend.app.stealth_scanner import evaluate_candidate
 from backend.app.strategy_backtest_repository import create_backtest_run, save_backtest_funnel, save_signal_outcomes
 from backend.app.tracking_repository import (
@@ -616,6 +616,97 @@ def test_stealth_diagnostics_returns_near_miss_without_polluting_candidates():
         _delete_stealth_test_symbol(symbol)
 
 
+def test_stealth_scope_hides_existing_non_mainboard_results_and_rejects_observation():
+    symbol = "300890.SZ"
+    _delete_stealth_test_symbol(symbol)
+    candidate = evaluate_candidate(
+        StockUniverseItem(symbol=symbol, name="测试创业板", listed_days=900),
+        _volume_price_bars(symbol),
+        market_profile={"float_market_cap_billion": 126, "volume_ratio": 1.7},
+    ).model_copy(update={"total_score": 30})
+    try:
+        with connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO stealth_scan_results (
+                    trading_day, symbol, name, stage, total_score, accumulation_score,
+                    launch_score, theme_score, risk_penalty, evidence, risks, metrics, source_ids
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb, '[]'::jsonb)
+                """,
+                (
+                    candidate.trading_day,
+                    candidate.symbol,
+                    candidate.name,
+                    candidate.stage,
+                    candidate.total_score,
+                    candidate.accumulation_score,
+                    candidate.launch_score,
+                    candidate.theme_score,
+                    candidate.risk_penalty,
+                ),
+            )
+        with TestClient(app) as client:
+            diagnostics = client.get("/api/stealth/diagnostics?limit=200&min_score=1")
+            observed = client.post(f"/api/stealth/observe/{symbol}", json={"reason": "不应允许"})
+
+        assert diagnostics.status_code == 200
+        assert all(item["symbol"] != symbol for item in diagnostics.json())
+        assert observed.status_code == 422
+        assert "沪深主板" in observed.json()["detail"]
+    finally:
+        _delete_stealth_test_symbol(symbol)
+
+
+def test_stealth_scope_rejects_explicit_non_mainboard_scan_backtest_and_known_st_observation():
+    st_symbol = "600097.SH"
+    _delete_stealth_test_symbol(st_symbol)
+    save_universe_items([StockUniverseItem(symbol=st_symbol, name="ST测试", is_st=True)])
+    try:
+        with TestClient(app) as client:
+            scan = client.post("/api/stealth/scan/run", json={"symbols": ["300001.SZ"]})
+            backtest = client.post("/api/strategy/backtests/run", json={"symbols": ["688001.SH"]})
+            observed = client.post(f"/api/stealth/observe/{st_symbol}", json={"reason": "不应允许"})
+            unknown = client.post("/api/stealth/observe/600093.SH", json={"reason": "无法确认非 ST"})
+
+        assert scan.status_code == 422
+        assert backtest.status_code == 422
+        assert observed.status_code == 422
+        assert unknown.status_code == 422
+        assert all("沪深主板" in response.json()["detail"] for response in [scan, backtest, observed, unknown])
+    finally:
+        _delete_stealth_test_symbol(st_symbol)
+
+
+def test_stealth_scope_hides_legacy_st_observation_even_when_universe_metadata_is_stale():
+    symbol = "600094.SH"
+    _delete_stealth_test_symbol(symbol)
+    save_universe_items([StockUniverseItem(symbol=symbol, name="旧普通名称", is_st=False)])
+    try:
+        with connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO stealth_scan_results (
+                    trading_day, symbol, name, stage, total_score, accumulation_score,
+                    launch_score, theme_score, risk_penalty, evidence, risks, metrics, source_ids
+                ) VALUES (%s, %s, 'ST旧结果', '数据不足', 10, 0, 0, 0, 90, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb, '[]'::jsonb)
+                """,
+                (date.today(), symbol),
+            )
+            conn.execute(
+                "INSERT INTO observation_list (user_id, symbol, reason) VALUES ('local-user', %s, '旧观察')",
+                (symbol,),
+            )
+        with TestClient(app) as client:
+            observations = client.get("/api/stealth/observations")
+            observed = client.post(f"/api/stealth/observe/{symbol}", json={"reason": "不应允许"})
+
+        assert observations.status_code == 200
+        assert all(item["symbol"] != symbol for item in observations.json())
+        assert observed.status_code == 422
+    finally:
+        _delete_stealth_test_symbol(symbol)
+
+
 def test_stealth_scan_run_endpoint_creates_background_task(monkeypatch):
     now = datetime.now(timezone.utc)
 
@@ -680,6 +771,7 @@ def test_stealth_observation_scan_enqueues_only_observed_symbols(monkeypatch):
 
     monkeypatch.setattr(main_module, "enqueue_stealth_scan_task", fake_enqueue)
     try:
+        save_universe_items([StockUniverseItem(symbol=symbol, name="观察池样本", is_st=False)])
         with TestClient(app) as client:
             observed = client.post(f"/api/stealth/observe/{symbol}", json={"reason": "测试观察池补扫"})
             assert observed.status_code == 200

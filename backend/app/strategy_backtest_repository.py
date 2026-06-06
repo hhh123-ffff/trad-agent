@@ -6,6 +6,7 @@ from uuid import uuid4
 from psycopg.types.json import Jsonb
 
 from .database import connect
+from .market_scope import is_mainboard_symbol, is_st_or_delisting_name, mainboard_symbol_sql
 from .models import (
     DailyBar,
     StockUniverseItem,
@@ -75,7 +76,14 @@ def get_latest_backtest_run() -> StrategyBacktestRun | None:
 
 
 def load_backtest_dataset(request: StrategyBacktestRequest) -> list[tuple[StockUniverseItem, list[DailyBar]]]:
-    where = ["d.adjust = 'qfq'"]
+    where = [
+        "d.adjust = 'qfq'",
+        mainboard_symbol_sql("d.symbol"),
+        "u.symbol IS NOT NULL",
+        "COALESCE(u.is_st, FALSE) = FALSE",
+        "UPPER(COALESCE(u.name, d.symbol)) NOT LIKE '%%ST%%'",
+        "COALESCE(u.name, d.symbol) NOT LIKE '%%退%%'",
+    ]
     values: list[Any] = []
     if request.symbols:
         where.append("d.symbol = ANY(%s)")
@@ -131,6 +139,11 @@ def load_backtest_dataset(request: StrategyBacktestRequest) -> list[tuple[StockU
 
 
 def save_signal_outcomes(outcomes: list[StrategySignalOutcome]) -> None:
+    outcomes = [
+        item
+        for item in outcomes
+        if is_mainboard_symbol(item.symbol) and not is_st_or_delisting_name(item.name)
+    ]
     with connect() as conn:
         for item in outcomes:
             conn.execute(
@@ -182,7 +195,7 @@ def list_signal_outcomes(
     limit: int = 100,
     offset: int = 0,
 ) -> list[StrategySignalOutcome]:
-    where: list[str] = []
+    where: list[str] = [mainboard_symbol_sql("symbol")]
     values: list[Any] = []
     if backtest_run_id is not None:
         where.append("backtest_run_id = %s")

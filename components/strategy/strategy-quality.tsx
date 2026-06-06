@@ -126,7 +126,7 @@ export function StrategyQuality() {
             策略质量审计
           </div>
           <p className="mt-1 max-w-3xl text-xs leading-5 text-muted">
-            历史回放采用下一交易日开盘作为入场基准；真实信号单独跟踪，不与回放样本混合。
+            仅评估沪深主板，排除 688、300/301、北交所与 ST；历史回放采用下一交易日开盘作为入场基准，真实信号单独跟踪。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

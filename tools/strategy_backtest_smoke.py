@@ -20,6 +20,7 @@ def _jsonable(value: Any) -> Any:
 
 def main() -> int:
     from backend.app.database import connect
+    from backend.app.market_scope import mainboard_symbol_sql
     from backend.app.models import StrategyBacktestRequest
     from backend.app.repositories import ensure_storage
     from backend.app.strategy_backtest_repository import get_backtest_detail, list_signal_outcomes
@@ -28,11 +29,17 @@ def main() -> int:
     ensure_storage()
     with connect() as conn:
         rows = conn.execute(
-            """
-            SELECT symbol, COUNT(*) AS bars, MAX(trade_date) AS latest_date
-            FROM daily_bars
-            WHERE adjust = 'qfq'
-            GROUP BY symbol
+            f"""
+            SELECT d.symbol, COUNT(*) AS bars, MAX(d.trade_date) AS latest_date
+            FROM daily_bars d
+            LEFT JOIN stock_universe u ON u.symbol = d.symbol
+            WHERE d.adjust = 'qfq'
+              AND {mainboard_symbol_sql('d.symbol')}
+              AND u.symbol IS NOT NULL
+              AND COALESCE(u.is_st, FALSE) = FALSE
+              AND UPPER(COALESCE(u.name, d.symbol)) NOT LIKE '%%ST%%'
+              AND COALESCE(u.name, d.symbol) NOT LIKE '%%退%%'
+            GROUP BY d.symbol
             HAVING COUNT(*) >= 120
             ORDER BY latest_date DESC, bars DESC
             LIMIT 3

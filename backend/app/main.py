@@ -31,6 +31,7 @@ from .market_provider import (
     build_live_replay,
     live_source,
 )
+from .market_scope import is_mainboard_symbol
 from .models import (
     AgentAction,
     AgentRun,
@@ -404,6 +405,8 @@ def stealth_candidate_detail(symbol: str) -> StealthCandidateDetail:
 @app.post("/api/stealth/scan/run", response_model=StealthScanTask)
 def stealth_scan_run(payload: StealthScanRunRequest | None = None) -> StealthScanTask:
     request = payload or StealthScanRunRequest()
+    if any(not is_mainboard_symbol(symbol) for symbol in request.symbols):
+        raise HTTPException(status_code=422, detail="策略范围仅允许沪深主板、非 ST 标的。")
     return enqueue_stealth_scan_task(request, _active_themes())
 
 
@@ -456,6 +459,8 @@ def stealth_retry_scan_task_failures(task_id: str) -> StealthScanTask:
 def strategy_backtest_run(payload: StrategyBacktestRequest) -> StrategyBacktestRun:
     if payload.start_date and payload.end_date and payload.start_date > payload.end_date:
         raise HTTPException(status_code=422, detail="start_date must not be after end_date.")
+    if any(not is_mainboard_symbol(symbol) for symbol in payload.symbols):
+        raise HTTPException(status_code=422, detail="策略范围仅允许沪深主板、非 ST 标的。")
     return enqueue_strategy_backtest(payload)
 
 
@@ -520,24 +525,30 @@ def stealth_resolve_scan_task_failures(task_id: str) -> dict[str, object]:
 @app.post("/api/stealth/observe/{symbol}", response_model=ObservationItem)
 def stealth_observe(symbol: str, payload: ObservationRequest | None = None) -> ObservationItem:
     request = payload or ObservationRequest()
-    return observe_symbol(
-        symbol,
-        reason=request.reason,
-        note=request.note,
-        invalidation_rule=request.invalidation_rule,
-        next_focus=request.next_focus,
-    )
+    try:
+        return observe_symbol(
+            symbol,
+            reason=request.reason,
+            note=request.note,
+            invalidation_rule=request.invalidation_rule,
+            next_focus=request.next_focus,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 @app.patch("/api/stealth/observe/{symbol}", response_model=ObservationItem)
 def stealth_update_observation(symbol: str, payload: ObservationRequest) -> ObservationItem:
-    return observe_symbol(
-        symbol,
-        reason=payload.reason,
-        note=payload.note,
-        invalidation_rule=payload.invalidation_rule,
-        next_focus=payload.next_focus,
-    )
+    try:
+        return observe_symbol(
+            symbol,
+            reason=payload.reason,
+            note=payload.note,
+            invalidation_rule=payload.invalidation_rule,
+            next_focus=payload.next_focus,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 @app.delete("/api/stealth/observe/{symbol}")

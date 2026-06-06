@@ -8,6 +8,7 @@ from psycopg.types.json import Jsonb
 
 from .database import connect
 from .data_providers import history_provider_sources
+from .market_scope import is_mainboard_symbol, is_st_or_delisting_name, mainboard_symbol_sql
 from .models import (
     DailyBar,
     ObservationItem,
@@ -125,6 +126,11 @@ def save_theme_memberships(memberships: list[ThemeMembership]) -> None:
 
 
 def save_scan_results(candidates: list[StealthCandidate]) -> None:
+    candidates = [
+        candidate
+        for candidate in candidates
+        if is_mainboard_symbol(candidate.symbol) and not is_st_or_delisting_name(candidate.name)
+    ]
     if not candidates:
         return
     ensure_stealth_source()
@@ -402,40 +408,59 @@ def build_scan_monitor() -> StealthScanMonitor:
 
 
 def build_data_quality_summary() -> StealthDataQualitySummary:
+    eligible_daily_bars = (
+        f"{mainboard_symbol_sql('d.symbol')} "
+        "AND u.symbol IS NOT NULL "
+        "AND COALESCE(u.is_st, FALSE) = FALSE "
+        "AND UPPER(COALESCE(u.name, d.symbol)) NOT LIKE '%%ST%%' "
+        "AND COALESCE(u.name, d.symbol) NOT LIKE '%%退%%'"
+    )
     with connect() as conn:
         latest_row = conn.execute(
-            """
-            SELECT trade_date AS latest_trade_date
-            FROM daily_bars
-            WHERE adjust = 'qfq'
-            GROUP BY trade_date
-            ORDER BY COUNT(DISTINCT symbol) DESC, trade_date DESC
+            f"""
+            SELECT d.trade_date AS latest_trade_date
+            FROM daily_bars d
+            LEFT JOIN stock_universe u ON u.symbol = d.symbol
+            WHERE d.adjust = 'qfq' AND {eligible_daily_bars}
+            GROUP BY d.trade_date
+            ORDER BY COUNT(DISTINCT d.symbol) DESC, d.trade_date DESC
             LIMIT 1
             """
         ).fetchone()
         latest_day = latest_row["latest_trade_date"] if latest_row else None
-        universe_row = conn.execute("SELECT COUNT(*) AS count FROM stock_universe WHERE is_st = FALSE").fetchone()
-        symbols_row = conn.execute("SELECT COUNT(DISTINCT symbol) AS count FROM daily_bars WHERE adjust = 'qfq'").fetchone()
-        short_row = conn.execute(
+        universe_row = conn.execute(
+            f"SELECT COUNT(*) AS count FROM stock_universe WHERE is_st = FALSE AND {mainboard_symbol_sql('symbol')} AND UPPER(name) NOT LIKE '%%ST%%' AND name NOT LIKE '%%退%%'"
+        ).fetchone()
+        symbols_row = conn.execute(
+            f"""
+            SELECT COUNT(DISTINCT d.symbol) AS count
+            FROM daily_bars d
+            LEFT JOIN stock_universe u ON u.symbol = d.symbol
+            WHERE d.adjust = 'qfq' AND {eligible_daily_bars}
             """
+        ).fetchone()
+        short_row = conn.execute(
+            f"""
             SELECT COUNT(*) AS count
             FROM (
-                SELECT symbol, COUNT(*) AS bars
-                FROM daily_bars
-                WHERE adjust = 'qfq'
-                GROUP BY symbol
+                SELECT d.symbol, COUNT(*) AS bars
+                FROM daily_bars d
+                LEFT JOIN stock_universe u ON u.symbol = d.symbol
+                WHERE d.adjust = 'qfq' AND {eligible_daily_bars}
+                GROUP BY d.symbol
                 HAVING COUNT(*) < 120
             ) short_history
             """
         ).fetchone()
         stale_row = conn.execute(
-            """
+            f"""
             SELECT COUNT(*) AS count
             FROM (
-                SELECT symbol, MAX(trade_date) AS latest_symbol_day
-                FROM daily_bars
-                WHERE adjust = 'qfq'
-                GROUP BY symbol
+                SELECT d.symbol, MAX(d.trade_date) AS latest_symbol_day
+                FROM daily_bars d
+                LEFT JOIN stock_universe u ON u.symbol = d.symbol
+                WHERE d.adjust = 'qfq' AND {eligible_daily_bars}
+                GROUP BY d.symbol
             ) latest_by_symbol
             WHERE %s::date IS NOT NULL
               AND latest_symbol_day < %s::date
@@ -444,16 +469,23 @@ def build_data_quality_summary() -> StealthDataQualitySummary:
         ).fetchone()
         if latest_day:
             latest_count_row = conn.execute(
-                "SELECT COUNT(DISTINCT symbol) AS count FROM daily_bars WHERE adjust = 'qfq' AND trade_date = %s",
+                f"""
+                SELECT COUNT(DISTINCT d.symbol) AS count
+                FROM daily_bars d
+                LEFT JOIN stock_universe u ON u.symbol = d.symbol
+                WHERE d.adjust = 'qfq' AND d.trade_date = %s AND {eligible_daily_bars}
+                """,
                 (latest_day,),
             ).fetchone()
             zero_amount_row = conn.execute(
-                """
-                SELECT COUNT(DISTINCT symbol) AS count
-                FROM daily_bars
-                WHERE adjust = 'qfq'
-                  AND trade_date = %s
-                  AND amount <= 0
+                f"""
+                SELECT COUNT(DISTINCT d.symbol) AS count
+                FROM daily_bars d
+                LEFT JOIN stock_universe u ON u.symbol = d.symbol
+                WHERE d.adjust = 'qfq'
+                  AND d.trade_date = %s
+                  AND d.amount <= 0
+                  AND {eligible_daily_bars}
                 """,
                 (latest_day,),
             ).fetchone()
@@ -520,7 +552,9 @@ def mark_unfinished_scan_tasks_failed() -> None:
 
 def latest_trading_day() -> date | None:
     with connect() as conn:
-        row = conn.execute("SELECT MAX(trading_day) AS trading_day FROM stealth_scan_results").fetchone()
+        row = conn.execute(
+            f"SELECT MAX(trading_day) AS trading_day FROM stealth_scan_results WHERE {mainboard_symbol_sql('symbol')} AND UPPER(name) NOT LIKE '%%ST%%' AND name NOT LIKE '%%退%%'"
+        ).fetchone()
     return row["trading_day"] if row and row["trading_day"] else None
 
 
@@ -539,7 +573,10 @@ def list_candidates(
     if day is None:
         return []
     params: list[Any] = [user_id, day, min_score]
-    where = "r.trading_day = %s AND r.total_score >= %s"
+    where = (
+        f"r.trading_day = %s AND r.total_score >= %s AND {mainboard_symbol_sql('r.symbol')} "
+        "AND UPPER(r.name) NOT LIKE '%%ST%%' AND r.name NOT LIKE '%%退%%'"
+    )
     if stage:
         where += " AND r.stage = %s"
         params.append(stage)
@@ -673,6 +710,26 @@ def observe_symbol(
     user_id: str = DEFAULT_USER_ID,
 ) -> ObservationItem:
     normalized = symbol.upper()
+    if not is_mainboard_symbol(normalized):
+        raise ValueError("仅允许将沪深主板、非 ST 标的加入观察池。")
+    with connect() as conn:
+        metadata = conn.execute(
+            """
+            SELECT BOOL_OR(blocked) AS blocked
+            FROM (
+                SELECT is_st OR UPPER(name) LIKE '%%ST%%' OR name LIKE '%%退%%' AS blocked
+                FROM stock_universe
+                WHERE symbol = %s
+                UNION ALL
+                SELECT UPPER(name) LIKE '%%ST%%' OR name LIKE '%%退%%' AS blocked
+                FROM stealth_scan_results
+                WHERE symbol = %s
+            ) known_status
+            """,
+            (normalized, normalized),
+        ).fetchone()
+    if not metadata or metadata["blocked"] is not False:
+        raise ValueError("仅允许将沪深主板、非 ST 标的加入观察池。")
     with connect() as conn:
         row = conn.execute(
             """
@@ -704,9 +761,13 @@ def delete_observation(symbol: str, user_id: str = DEFAULT_USER_ID) -> bool:
 def list_observations(user_id: str = DEFAULT_USER_ID) -> list[ObservationItem]:
     with connect() as conn:
         rows = conn.execute(
-            """
+            f"""
             WITH latest AS (
-                SELECT MAX(trading_day) AS trading_day FROM stealth_scan_results
+                SELECT MAX(trading_day) AS trading_day
+                FROM stealth_scan_results
+                WHERE {mainboard_symbol_sql('symbol')}
+                  AND UPPER(name) NOT LIKE '%%ST%%'
+                  AND name NOT LIKE '%%退%%'
             )
             SELECT
                 o.symbol AS observation_symbol,
@@ -736,13 +797,34 @@ def list_observations(user_id: str = DEFAULT_USER_ID) -> list[ObservationItem]:
             FROM observation_list o
             LEFT JOIN latest l ON TRUE
             LEFT JOIN stealth_scan_results r
-                ON r.symbol = o.symbol AND r.trading_day = l.trading_day
+                ON r.symbol = o.symbol
+               AND r.trading_day = l.trading_day
+               AND UPPER(r.name) NOT LIKE '%%ST%%'
+               AND r.name NOT LIKE '%%退%%'
             LEFT JOIN LATERAL (
                 SELECT array_agg(tm.theme_name) AS themes
                 FROM theme_memberships tm
                 WHERE tm.symbol = o.symbol
             ) t ON TRUE
+            LEFT JOIN stock_universe u ON u.symbol = o.symbol
             WHERE o.user_id = %s
+              AND {mainboard_symbol_sql('o.symbol')}
+              AND (
+                  u.symbol IS NOT NULL
+                  OR EXISTS (
+                      SELECT 1 FROM stealth_scan_results known
+                      WHERE known.symbol = o.symbol
+                  )
+              )
+              AND COALESCE(u.is_st, FALSE) = FALSE
+              AND UPPER(COALESCE(u.name, '')) NOT LIKE '%%ST%%'
+              AND COALESCE(u.name, '') NOT LIKE '%%退%%'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM stealth_scan_results blocked
+                  WHERE blocked.symbol = o.symbol
+                    AND (UPPER(blocked.name) LIKE '%%ST%%' OR blocked.name LIKE '%%退%%')
+              )
             ORDER BY o.updated_at DESC
             """,
             (user_id,),
@@ -876,7 +958,7 @@ def list_observation_journal(
     limit: int = 80,
 ) -> list[ObservationJournalEntry]:
     params: list[Any] = [user_id]
-    where = "user_id = %s"
+    where = f"user_id = %s AND {mainboard_symbol_sql('symbol')} AND UPPER(name) NOT LIKE '%%ST%%' AND name NOT LIKE '%%退%%'"
     if symbol:
         where += " AND symbol = %s"
         params.append(symbol.upper())

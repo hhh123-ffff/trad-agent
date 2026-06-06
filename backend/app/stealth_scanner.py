@@ -9,6 +9,7 @@ import pandas as pd
 
 from .data_providers import history_data_provider, history_data_source_ids
 from .history_provider import HistoryDataUnavailable, fetch_stock_market_profiles
+from .market_scope import is_mainboard_eligible, is_mainboard_symbol
 from .models import DailyBar, StealthCandidate, StealthScanRunResponse, StockUniverseItem, ThemeMembership
 from .repositories import list_watchlist
 from .stealth_repository import save_daily_bars, save_scan_results, save_theme_memberships, save_universe_items
@@ -31,14 +32,6 @@ def _clip(value: float) -> float:
 
 def _frame(bars: Sequence[DailyBar]) -> pd.DataFrame:
     return pd.DataFrame([bar.model_dump() for bar in bars]).sort_values("trade_date").reset_index(drop=True)
-
-
-def _is_mainboard_symbol(symbol: str) -> bool:
-    code = symbol.split(".")[0]
-    suffix = symbol.split(".")[-1].upper() if "." in symbol else ""
-    return (suffix == "SH" and code.startswith(("600", "601", "603", "605"))) or (
-        suffix == "SZ" and code.startswith(("000", "001", "002", "003"))
-    )
 
 
 def _profile_number(profile: dict[str, Any], *keys: str) -> float:
@@ -81,8 +74,8 @@ def evaluate_candidate(
         return _candidate(item, trading_day, "数据不足", 0, 0, 0, 0, 100, evidence, risks, metrics, theme_names, source_ids)
 
     metrics["strategy_profile"] = "mainboard_volume_price"
-    metrics["mainboard_match"] = "yes" if _is_mainboard_symbol(item.symbol) else "no"
-    if not _is_mainboard_symbol(item.symbol):
+    metrics["mainboard_match"] = "yes" if is_mainboard_symbol(item.symbol) else "no"
+    if not is_mainboard_symbol(item.symbol):
         risks.append("仅筛选沪深主板标的，科创板、创业板、北交所不进入主候选。")
         return _candidate(item, trading_day, "数据不足", 0, 0, 0, 0, 100, evidence, risks, metrics, theme_names, source_ids)
 
@@ -386,34 +379,26 @@ def run_stealth_scan(
 ) -> StealthScanRunResponse:
     universe = history_data_provider.stock_universe()
     source_ids = history_data_source_ids(history_data_provider)
-    requested = {symbol.upper() for symbol in symbols or []}
-    watchlist_symbols = {item.symbol for item in list_watchlist()} if include_watchlist else set()
+    requested = {symbol.upper() for symbol in symbols or [] if is_mainboard_symbol(symbol)}
+    watchlist_symbols = {item.symbol for item in list_watchlist() if is_mainboard_symbol(item.symbol)} if include_watchlist else set()
     selected: list[StockUniverseItem] = []
     seen: set[str] = set()
     if requested:
         target_symbols = requested | watchlist_symbols
         for item in universe:
-            if item.symbol in seen or item.is_st or item.symbol not in target_symbols:
+            if item.symbol in seen or not is_mainboard_eligible(item) or item.symbol not in target_symbols:
                 continue
             selected.append(item)
             seen.add(item.symbol)
-        for symbol in sorted(target_symbols):
-            if symbol not in seen:
-                selected.append(StockUniverseItem(symbol=symbol, name=symbol, listed_days=999))
-                seen.add(symbol)
     else:
-        eligible = [item for item in universe if not item.is_st]
+        eligible = [item for item in universe if is_mainboard_eligible(item)]
         batch = eligible[offset:]
         for item in batch:
-            if item.symbol in seen or item.is_st:
+            if item.symbol in seen or not is_mainboard_eligible(item):
                 continue
             if limit is None or len(selected) < limit or item.symbol in watchlist_symbols:
                 selected.append(item)
                 seen.add(item.symbol)
-        for symbol in sorted(watchlist_symbols):
-            if symbol not in seen:
-                selected.append(StockUniverseItem(symbol=symbol, name=symbol, listed_days=999))
-                seen.add(symbol)
 
     total = len(selected)
     if progress:

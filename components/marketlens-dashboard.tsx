@@ -1434,7 +1434,7 @@ function StealthPanel({
             </span>
           </div>
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {["沪深主板", "流通市值 50-200 亿", "涨幅 2.5%-6%", "换手 4%-12%", "量能台阶", "均线多头"].map((label) => (
+            {["仅沪深主板", "排除 688 / 300 / 301 / 北交 / ST", "流通市值 50-200 亿", "涨幅 2.5%-6%", "换手 4%-12%", "量能台阶", "均线多头"].map((label) => (
               <span key={label} className="rounded-md border border-ink/10 bg-white px-2 py-1 text-[11px] font-semibold text-muted">
                 {label}
               </span>
