@@ -27,7 +27,13 @@ from backend.app.models import (
 )
 from backend.app.stealth_repository import create_scan_task, list_candidates, record_scan_failure, save_daily_bars, save_scan_results
 from backend.app.stealth_scanner import evaluate_candidate
-from backend.app.tracking_repository import _day_window
+from backend.app.tracking_repository import (
+    _day_window,
+    create_app_notification,
+    create_job_run,
+    create_job_run_step,
+    finish_job_run_step,
+)
 
 
 def _delete_stealth_test_symbol(symbol: str) -> None:
@@ -984,4 +990,50 @@ def test_tracking_information_summary_groups_news_and_announcements(monkeypatch)
         assert payload["latest_items"][0]["source_id"] in {"src-test-news", "src-test-announcement"}
         assert not payload["warnings"]
     finally:
+        _delete_tracking_test_rows()
+
+
+def test_admin_job_detail_step_rerun_and_notifications(monkeypatch):
+    run = create_job_run("post_market_replay")
+    step = create_job_run_step(run.id, "collect_information", attempt=1)
+    finish_job_run_step(
+        step.id,
+        "failed",
+        error_code="temporary_provider_error",
+        error="provider timed out",
+        retryable=True,
+    )
+    notification = create_app_notification(
+        notification_type="pipeline_degraded",
+        severity="warning",
+        title="Replay degraded",
+        message="Information collection failed.",
+        related_job_run_id=run.id,
+    )
+    monkeypatch.setattr(tracking_service, "collect_news_and_announcements", lambda: ([object()], [object(), object()]))
+
+    try:
+        with TestClient(app) as client:
+            detail = client.get(f"/api/admin/jobs/runs/{run.id}")
+            rerun = client.post(f"/api/admin/jobs/runs/{run.id}/steps/collect_information/rerun")
+            unread = client.get("/api/admin/notifications?unread_only=true")
+            marked = client.post(f"/api/admin/notifications/{notification.id}/read")
+            missing_run = client.get("/api/admin/jobs/runs/unknown-run")
+            missing_step = client.post(f"/api/admin/jobs/runs/{run.id}/steps/not-a-step/rerun")
+
+        assert detail.status_code == 200
+        assert detail.json()["run"]["id"] == run.id
+        assert detail.json()["steps"][0]["error_code"] == "temporary_provider_error"
+        assert rerun.status_code == 200
+        attempts = [item["attempt"] for item in rerun.json()["steps"] if item["step_name"] == "collect_information"]
+        assert attempts == [1, 2]
+        assert rerun.json()["steps"][-1]["status"] == "completed"
+        assert any(item["id"] == notification.id for item in unread.json())
+        assert marked.status_code == 200
+        assert marked.json()["read_at"] is not None
+        assert missing_run.status_code == 404
+        assert missing_step.status_code == 404
+    finally:
+        with connect() as conn:
+            conn.execute("DELETE FROM app_notifications WHERE id = %s", (notification.id,))
         _delete_tracking_test_rows()

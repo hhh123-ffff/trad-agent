@@ -78,10 +78,12 @@ def run_pipeline_step(
     handler: Callable[[], StepOutcome],
     *,
     max_attempts: int = 3,
+    start_attempt: int = 1,
     sleep: Callable[[float], None] = time.sleep,
 ) -> JobRunStep:
     attempts = max(1, max_attempts)
-    for attempt in range(1, attempts + 1):
+    first_attempt = max(1, start_attempt)
+    for attempt in range(first_attempt, first_attempt + attempts):
         step = create_job_run_step(job_run_id, step_name, attempt=attempt)
         try:
             outcome = handler()
@@ -99,9 +101,9 @@ def run_pipeline_step(
                 error=str(exc),
                 retryable=classified.retryable,
             )
-            if not classified.retryable or attempt >= attempts:
+            if not classified.retryable or attempt >= first_attempt + attempts - 1:
                 return failed
-            sleep(min(0.25 * attempt, 1.0))
+            sleep(min(0.25 * (attempt - first_attempt + 1), 1.0))
     raise RuntimeError("pipeline step ended without a result")
 
 

@@ -24,9 +24,11 @@ from .tracking_repository import (
     create_job_run,
     finish_job_run,
     get_daily_tracking_report,
+    get_job_run_detail,
     load_data_freshness_inputs,
     list_announcement_items,
     list_job_runs,
+    list_job_run_steps,
     list_market_events,
     list_market_snapshots,
     list_news_items,
@@ -82,6 +84,74 @@ def run_tracking_job(job_name: str) -> JobRun:
 
 def recent_job_runs(limit: int = 40, job_name: str | None = None) -> list[JobRun]:
     return list_job_runs(limit=limit, job_name=_normalize_job_name(job_name) if job_name else None)
+
+
+def tracking_job_run_detail(run_id: str):
+    return get_job_run_detail(run_id)
+
+
+def rerun_tracking_job_step(run_id: str, step_name: str):
+    detail = get_job_run_detail(run_id)
+    if detail is None:
+        raise KeyError(run_id)
+    if detail.run.job_name != "post_market_replay":
+        raise KeyError(step_name)
+
+    known_steps = {
+        "close_snapshot",
+        "collect_information",
+        "stealth_scan",
+        "observation_journal",
+        "daily_report",
+        "agent_post_market",
+    }
+    if step_name not in known_steps:
+        raise KeyError(step_name)
+    matching = [step for step in detail.steps if step.step_name == step_name]
+    if not matching or matching[-1].status not in {"failed", "degraded", "skipped"}:
+        raise ValueError(step_name)
+
+    target_day = datetime.now(CN_TZ).date()
+    raw_day = detail.run.affected_scope.get("trading_day")
+    if isinstance(raw_day, str):
+        target_day = date.fromisoformat(raw_day)
+
+    def handler() -> StepOutcome:
+        if step_name == "close_snapshot":
+            snapshot = capture_market_snapshot()
+            return StepOutcome(result_scope={"snapshot_id": snapshot.id, "events": len(snapshot.event_ids)})
+        if step_name == "collect_information":
+            news, announcements = collect_news_and_announcements()
+            return StepOutcome(result_scope={"news": len(news), "announcements": len(announcements)})
+        if step_name == "stealth_scan":
+            result = run_stealth_scan(
+                limit=_post_market_scan_limit(),
+                offset=_post_market_scan_offset(),
+                active_themes=[],
+                include_watchlist=True,
+            )
+            return StepOutcome(result_scope={"trading_day": result.trading_day.isoformat(), "saved": result.saved, "failed": result.failed})
+        if step_name == "observation_journal":
+            return StepOutcome(result_scope={"observation_journal": len(snapshot_observation_journal())})
+        if step_name == "daily_report":
+            report = build_daily_tracking_report(target_day)
+            return StepOutcome(result_scope={"trading_day": report.trading_day.isoformat(), "sections": len(report.sections)})
+        agent_scope, _ = _agent_post_market_job()
+        return StepOutcome(
+            status="degraded" if agent_scope.get("agent_status") == "degraded" else "completed",
+            result_scope=agent_scope,
+        )
+
+    next_attempt = max(step.attempt for step in matching) + 1
+    run_pipeline_step(run_id, step_name, handler, start_attempt=next_attempt)
+    status = aggregate_pipeline_status(list_job_run_steps(run_id))
+    finish_job_run(
+        run_id,
+        status,
+        message="指定步骤已重跑，运行状态已刷新。",
+        affected_scope=detail.run.affected_scope,
+    )
+    return get_job_run_detail(run_id)
 
 
 def tracking_daily_report(trading_day: date | None = None) -> DailyTrackingReport:

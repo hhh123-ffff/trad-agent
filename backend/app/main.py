@@ -38,6 +38,7 @@ from .models import (
     AgentStatusResponse,
     AgentUsageSummary,
     AnnouncementItem,
+    AppNotification,
     AssistantAnswer,
     AssistantQuery,
     ComplianceCheck,
@@ -46,6 +47,7 @@ from .models import (
     DashboardResponse,
     InformationSummary,
     JobRun,
+    JobRunDetail,
     MarketEvent,
     MarketSnapshot,
     NewsItem,
@@ -98,7 +100,16 @@ from .stealth_repository import (
 from .stealth_tasks import enqueue_failed_symbols_retry, enqueue_stealth_scan_task
 from .tracking_repository import list_announcement_items, list_market_events, list_market_snapshots, list_news_items
 from .tracking_scheduler import start_scheduler, stop_scheduler
-from .tracking_service import JOB_SPECS, build_information_summary, recent_job_runs, run_tracking_job, tracking_daily_report
+from .tracking_repository import list_app_notifications, mark_app_notification_read
+from .tracking_service import (
+    JOB_SPECS,
+    build_information_summary,
+    recent_job_runs,
+    rerun_tracking_job_step,
+    run_tracking_job,
+    tracking_daily_report,
+    tracking_job_run_detail,
+)
 
 
 MARKET_CACHE_TTL_SECONDS = 20
@@ -535,6 +546,38 @@ def run_admin_job(job_name: str) -> JobRun:
 @app.get("/api/admin/jobs/runs", response_model=list[JobRun])
 def admin_job_runs(limit: int = 40, job_name: str | None = None) -> list[JobRun]:
     return recent_job_runs(limit=min(max(limit, 1), 200), job_name=job_name)
+
+
+@app.get("/api/admin/jobs/runs/{run_id}", response_model=JobRunDetail)
+def admin_job_run_detail(run_id: str) -> JobRunDetail:
+    detail = tracking_job_run_detail(run_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Unknown tracking job run.")
+    return detail
+
+
+@app.post("/api/admin/jobs/runs/{run_id}/steps/{step_name}/rerun", response_model=JobRunDetail)
+def admin_job_step_rerun(run_id: str, step_name: str) -> JobRunDetail:
+    try:
+        detail = rerun_tracking_job_step(run_id, step_name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Unknown tracking job run or step.") from None
+    except ValueError:
+        raise HTTPException(status_code=409, detail="Step is not eligible for rerun.") from None
+    return detail
+
+
+@app.get("/api/admin/notifications", response_model=list[AppNotification])
+def admin_notifications(unread_only: bool = False, limit: int = 50) -> list[AppNotification]:
+    return list_app_notifications(unread_only=unread_only, limit=min(max(limit, 1), 200))
+
+
+@app.post("/api/admin/notifications/{notification_id}/read", response_model=AppNotification)
+def admin_notification_read(notification_id: str) -> AppNotification:
+    notification = mark_app_notification_read(notification_id)
+    if notification is None:
+        raise HTTPException(status_code=404, detail="Unknown notification.")
+    return notification
 
 
 @app.get("/api/agents/runs", response_model=list[AgentRun])
