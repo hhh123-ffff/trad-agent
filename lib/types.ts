@@ -415,7 +415,9 @@ export interface ObservationJournalEntry {
   updated_at: string;
 }
 
-export type JobRunStatus = "queued" | "running" | "completed" | "failed";
+export type JobRunStatus = "queued" | "running" | "completed" | "degraded" | "failed" | "skipped";
+export type JobRunStepStatus = "pending" | "running" | "completed" | "degraded" | "failed" | "skipped";
+export type FreshnessStatus = "fresh" | "stale" | "missing";
 
 export interface JobRun {
   id: string;
@@ -429,6 +431,53 @@ export interface JobRun {
   error: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface JobRunStep {
+  id: string;
+  job_run_id: string;
+  step_name: string;
+  status: JobRunStepStatus;
+  attempt: number;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number;
+  result_scope: Record<string, unknown>;
+  error_code: string | null;
+  error: string | null;
+  retryable: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobRunDetail {
+  run: JobRun;
+  steps: JobRunStep[];
+}
+
+export interface FreshnessCheck {
+  scope: string;
+  status: FreshnessStatus;
+  expected_date: string;
+  actual_date: string | null;
+  message: string;
+}
+
+export interface DataFreshnessResult {
+  status: FreshnessStatus;
+  checks: FreshnessCheck[];
+}
+
+export interface AppNotification {
+  id: string;
+  notification_type: "pipeline_completed" | "pipeline_degraded" | "pipeline_failed" | "data_stale";
+  severity: "info" | "warning" | "critical";
+  title: string;
+  message: string;
+  related_job_run_id: string | null;
+  metadata: Record<string, unknown>;
+  read_at: string | null;
+  created_at: string;
 }
 
 export interface MarketSnapshot {

@@ -4,11 +4,13 @@ import type {
   AgentRunDetail,
   AgentStatusResponse,
   AgentUsageSummary,
+  AppNotification,
   AssistantAnswer,
   DashboardResponse,
   DailyTrackingReport,
   InformationSummary,
   JobRun,
+  JobRunDetail,
   MarketEvent,
   MarketSnapshot,
   NewsItem,
@@ -298,6 +300,31 @@ export async function loadAdminJobRuns(params?: { limit?: number; jobName?: stri
   if (params?.jobName) query.set("job_name", params.jobName);
   const suffix = query.toString() ? `?${query.toString()}` : "";
   return request<JobRun[]>(`/api/admin/jobs/runs${suffix}`);
+}
+
+export async function loadAdminJobRunDetail(runId: string) {
+  return request<JobRunDetail>(`/api/admin/jobs/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function rerunAdminJobStep(runId: string, stepName: string) {
+  return request<JobRunDetail>(
+    `/api/admin/jobs/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepName)}/rerun`,
+    { method: "POST" }
+  );
+}
+
+export async function loadAdminNotifications(params?: { unreadOnly?: boolean; limit?: number }) {
+  const query = new URLSearchParams();
+  if (params?.unreadOnly) query.set("unread_only", "true");
+  if (typeof params?.limit === "number") query.set("limit", params.limit.toString());
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request<AppNotification[]>(`/api/admin/notifications${suffix}`);
+}
+
+export async function markAdminNotificationRead(notificationId: string) {
+  return request<AppNotification>(`/api/admin/notifications/${encodeURIComponent(notificationId)}/read`, {
+    method: "POST"
+  });
 }
 
 export async function loadNewsItems(params?: { date?: string; symbol?: string }) {

@@ -1,12 +1,16 @@
-import type { JobRun } from "@/lib/types";
+import type { DataFreshnessResult, JobRun, JobRunDetail, JobRunStep, JobRunStepStatus } from "@/lib/types";
 
-export type PipelineStatus = "completed" | "failed" | "skipped" | "pending";
+export type PipelineStatus = JobRunStepStatus;
 
 export interface JobPipelineStep {
-  key: "snapshot" | "information" | "scan" | "observation_journal" | "report";
+  key: "close_snapshot" | "collect_information" | "stealth_scan" | "observation_journal" | "daily_report" | "agent_post_market";
   label: string;
   status: PipelineStatus;
   detail: string;
+  attempts: number;
+  durationMs: number;
+  errorCode: string | null;
+  retryable: boolean;
 }
 
 function scopeObject(value: unknown): Record<string, unknown> {
@@ -14,7 +18,7 @@ function scopeObject(value: unknown): Record<string, unknown> {
 }
 
 function statusValue(value: unknown): PipelineStatus {
-  return value === "completed" || value === "failed" || value === "skipped" ? value : "pending";
+  return value === "running" || value === "completed" || value === "degraded" || value === "failed" || value === "skipped" ? value : "pending";
 }
 
 function textValue(value: unknown): string {
@@ -41,9 +45,13 @@ export function latestPostMarketRun(jobRuns: JobRun[]): JobRun | null {
 
 export function postMarketPipeline(run: JobRun | null): JobPipelineStep[] {
   const scope = scopeObject(run?.affected_scope);
-  const snapshot = scopeObject(scope.snapshot);
-  const information = scopeObject(scope.information);
-  const scan = scopeObject(scope.scan);
+  const durableSteps = scopeObject(scope.steps);
+  const snapshot = scopeObject(durableSteps.close_snapshot ?? scope.snapshot);
+  const information = scopeObject(durableSteps.collect_information ?? scope.information);
+  const scan = scopeObject(durableSteps.stealth_scan ?? scope.scan);
+  const journal = scopeObject(durableSteps.observation_journal);
+  const report = scopeObject(durableSteps.daily_report);
+  const agent = scopeObject(durableSteps.agent_post_market);
 
   const snapshotEvents = numberValue(snapshot.events ?? scope.events);
   const news = numberValue(information.news ?? scope.news);
@@ -55,34 +63,110 @@ export function postMarketPipeline(run: JobRun | null): JobPipelineStep[] {
 
   return [
     {
-      key: "snapshot",
-      label: "Market snapshot",
+      key: "close_snapshot",
+      label: "收盘快照",
       status: statusValue(snapshot.status),
       detail: textValue(snapshot.error) || `Events: ${snapshotEvents}`,
+      attempts: 0,
+      durationMs: 0,
+      errorCode: null,
+      retryable: false
     },
     {
-      key: "information",
-      label: "News and announcements",
+      key: "collect_information",
+      label: "公告与新闻",
       status: statusValue(information.status),
       detail: textValue(information.error) || `News: ${news} / Announcements: ${announcements}`,
+      attempts: 0,
+      durationMs: 0,
+      errorCode: null,
+      retryable: false
     },
     {
-      key: "scan",
-      label: "Stealth scan",
+      key: "stealth_scan",
+      label: "策略扫描",
       status: statusValue(scan.status),
       detail: textValue(scan.error) || textValue(scan.reason) || `Scanned: ${scanned} / Saved: ${saved}`,
+      attempts: 0,
+      durationMs: 0,
+      errorCode: null,
+      retryable: false
     },
     {
       key: "observation_journal",
-      label: "Observation journal",
-      status: typeof scope.observation_journal === "number" ? "completed" : "pending",
-      detail: `Records: ${journalCount}`,
+      label: "观察池日志",
+      status: Object.keys(journal).length > 0 || typeof scope.observation_journal === "number" ? "completed" : "pending",
+      detail: `Records: ${numberValue(journal.observation_journal) || journalCount}`,
+      attempts: 0,
+      durationMs: 0,
+      errorCode: null,
+      retryable: false
     },
     {
-      key: "report",
-      label: "Daily report",
-      status: typeof scope.report_sections === "number" ? "completed" : "pending",
-      detail: `Sections: ${reportSections}`,
+      key: "daily_report",
+      label: "确定性日报",
+      status: Object.keys(report).length > 0 || typeof scope.report_sections === "number" ? "completed" : "pending",
+      detail: `Sections: ${numberValue(report.sections) || reportSections}`,
+      attempts: 0,
+      durationMs: 0,
+      errorCode: null,
+      retryable: false
+    },
+    {
+      key: "agent_post_market",
+      label: "Agent 简报",
+      status: Object.keys(agent).length > 0 ? statusValue(agent.status ?? agent.agent_status) : "pending",
+      detail: textValue(agent.reason) || textValue(agent.agent_status) || "等待确定性日报",
+      attempts: 0,
+      durationMs: 0,
+      errorCode: null,
+      retryable: false
     },
   ];
+}
+
+const STEP_LABELS: Record<JobPipelineStep["key"], string> = {
+  close_snapshot: "收盘快照",
+  collect_information: "公告与新闻",
+  stealth_scan: "策略扫描",
+  observation_journal: "观察池日志",
+  daily_report: "确定性日报",
+  agent_post_market: "Agent 简报"
+};
+
+export function detailedPostMarketPipeline(detail: JobRunDetail | null): JobPipelineStep[] {
+  const grouped = new Map<string, JobRunStep[]>();
+  for (const step of detail?.steps ?? []) {
+    grouped.set(step.step_name, [...(grouped.get(step.step_name) ?? []), step]);
+  }
+  return (Object.keys(STEP_LABELS) as JobPipelineStep["key"][]).map((key) => {
+    const attempts = grouped.get(key) ?? [];
+    const latest = attempts.at(-1);
+    return {
+      key,
+      label: STEP_LABELS[key],
+      status: latest?.status ?? "pending",
+      detail: latest ? stepDetail(latest) : "尚未执行",
+      attempts: attempts.length,
+      durationMs: latest?.duration_ms ?? 0,
+      errorCode: latest?.error_code ?? null,
+      retryable: Boolean(latest && (latest.retryable || latest.status === "degraded" || latest.status === "skipped"))
+    };
+  });
+}
+
+export function jobRunFreshness(run: JobRun | null): DataFreshnessResult | null {
+  const scope = scopeObject(run?.affected_scope);
+  const freshness = scopeObject(scope.data_freshness);
+  if (!freshness.status || !Array.isArray(freshness.checks)) return null;
+  return freshness as unknown as DataFreshnessResult;
+}
+
+function stepDetail(step: JobRunStep): string {
+  if (step.error) return step.error;
+  const entries = Object.entries(step.result_scope)
+    .filter(([, value]) => typeof value === "string" || typeof value === "number")
+    .slice(0, 3)
+    .map(([key, value]) => `${key}: ${value}`);
+  return entries.join(" · ") || "步骤已记录";
 }

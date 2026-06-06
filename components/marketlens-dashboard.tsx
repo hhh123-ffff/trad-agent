@@ -30,6 +30,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 
 import { AgentConsole } from "@/components/agents/agent-console";
 import { DataSourceStatusPanel } from "@/components/data-sources/data-source-status";
+import { DailyOperations } from "@/components/tracking/daily-operations";
 import { ReplayView } from "@/components/views/replay-view";
 import {
   approveAgentAction,
@@ -2445,6 +2446,7 @@ function DataStatusView({
 }) {
   return (
     <div className="space-y-5">
+      <DailyOperations jobRuns={jobRuns} onRunJob={onRunJob} />
       <AgentConsole
         runs={agentRuns}
         detail={agentRunDetail}
@@ -2514,6 +2516,7 @@ function JobRunsPanel({ jobRuns, onRunJob }: { jobRuns: JobRun[]; onRunJob: (job
 function jobStatusClass(status: string) {
   if (status === "completed") return "border-pine/20 bg-pine/10 text-pine";
   if (status === "failed") return "border-danger/20 bg-danger/10 text-danger";
+  if (status === "degraded" || status === "skipped") return "border-saffron/30 bg-saffron/10 text-saffron";
   return "border-signal/20 bg-signal/10 text-signal";
 }
 
