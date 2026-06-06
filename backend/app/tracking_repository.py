@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from psycopg.types.json import Jsonb
 
+from .data_freshness import DataFreshnessInputs
 from .database import connect
 from .market_provider import CN_TZ
 from .models import (
@@ -222,6 +223,25 @@ def mark_app_notification_read(notification_id: str) -> AppNotification | None:
             (notification_id,),
         ).fetchone()
     return _app_notification_from_row(row) if row else None
+
+
+def load_data_freshness_inputs() -> DataFreshnessInputs:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                (SELECT MAX((captured_at AT TIME ZONE 'Asia/Shanghai')::date) FROM market_snapshots) AS snapshot_date,
+                (SELECT MAX(trade_date) FROM daily_bars WHERE adjust = 'qfq') AS daily_bar_date,
+                (SELECT MAX((published_at AT TIME ZONE 'Asia/Shanghai')::date) FROM announcement_items) AS announcement_coverage_date,
+                (SELECT MAX(trading_day) FROM daily_tracking_reports) AS report_date,
+                (
+                    SELECT MAX((started_at AT TIME ZONE 'Asia/Shanghai')::date)
+                    FROM agent_runs
+                    WHERE workflow = 'post_market' AND status IN ('completed', 'degraded')
+                ) AS agent_report_date
+            """
+        ).fetchone()
+    return DataFreshnessInputs(**row)
 
 
 def save_market_events(events: list[MarketEvent]) -> None:
