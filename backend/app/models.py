@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any, Literal
 
@@ -383,6 +383,91 @@ class StealthCandidateDetail(BaseModel):
     bars: list[DailyBar]
     weekly_bars: list[DailyBar]
     source_refs: list[SourceRef]
+
+
+StrategyBacktestRunStatus = Literal["queued", "running", "completed", "failed"]
+StrategySignalOrigin = Literal["replay", "live"]
+
+
+class StrategyBacktestRequest(BaseModel):
+    start_date: date | None = None
+    end_date: date | None = None
+    symbols: list[str] = Field(default_factory=list)
+    repeat_days: int = Field(default=3, ge=2, le=10)
+
+
+class StrategyBacktestRun(BaseModel):
+    id: str
+    strategy_profile: str = "mainboard_volume_price"
+    status: StrategyBacktestRunStatus
+    start_date: date | None = None
+    end_date: date | None = None
+    horizons: list[int] = Field(default_factory=lambda: [1, 3, 5, 10])
+    repeat_days: int = 3
+    requested_symbols: list[str] = Field(default_factory=list)
+    total_symbols: int = 0
+    total_symbol_days: int = 0
+    evaluated_symbol_days: int = 0
+    raw_signals: int = 0
+    primary_signals: int = 0
+    mature_signals: int = 0
+    progress: float = 0
+    summary: dict[str, Any] = Field(default_factory=dict)
+    data_quality: dict[str, Any] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+    message: str = ""
+    error: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    updated_at: datetime
+
+
+class StrategySignalOutcome(BaseModel):
+    id: str
+    origin: StrategySignalOrigin
+    backtest_run_id: str | None = None
+    strategy_profile: str = "mainboard_volume_price"
+    signal_date: date
+    symbol: str
+    name: str
+    stage: str
+    total_score: float = 0
+    accumulation_score: float = 0
+    launch_score: float = 0
+    theme_score: float = 0
+    risk_penalty: float = 0
+    entry_date: date | None = None
+    entry_price: float | None = None
+    signal_close: float | None = None
+    included_primary: bool = True
+    duplicate_reason: str = ""
+    sample_quality: str = ""
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    horizon_outcomes: dict[str, Any] = Field(default_factory=dict)
+    source_ids: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class StrategyBacktestFunnel(BaseModel):
+    backtest_run_id: str
+    counts: dict[str, int] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class StrategyBacktestDetail(BaseModel):
+    run: StrategyBacktestRun
+    funnel: StrategyBacktestFunnel | None = None
+
+
+class StrategyLiveOutcomeSummary(BaseModel):
+    total_signals: int = 0
+    mature_signals: int = 0
+    summary: dict[str, Any] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
 
 
 class StealthScanRunRequest(BaseModel):

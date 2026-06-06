@@ -206,6 +206,77 @@ def init_schema() -> None:
             );
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_backtest_runs (
+                id TEXT PRIMARY KEY,
+                strategy_profile TEXT NOT NULL DEFAULT 'mainboard_volume_price',
+                status TEXT NOT NULL,
+                start_date DATE,
+                end_date DATE,
+                horizons JSONB NOT NULL DEFAULT '[1,3,5,10]'::jsonb,
+                repeat_days INTEGER NOT NULL DEFAULT 3,
+                requested_symbols JSONB NOT NULL DEFAULT '[]'::jsonb,
+                total_symbols INTEGER NOT NULL DEFAULT 0,
+                total_symbol_days INTEGER NOT NULL DEFAULT 0,
+                evaluated_symbol_days INTEGER NOT NULL DEFAULT 0,
+                raw_signals INTEGER NOT NULL DEFAULT 0,
+                primary_signals INTEGER NOT NULL DEFAULT 0,
+                mature_signals INTEGER NOT NULL DEFAULT 0,
+                progress NUMERIC(8, 6) NOT NULL DEFAULT 0,
+                summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+                data_quality JSONB NOT NULL DEFAULT '{}'::jsonb,
+                limitations JSONB NOT NULL DEFAULT '[]'::jsonb,
+                message TEXT NOT NULL DEFAULT '',
+                error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                started_at TIMESTAMPTZ,
+                finished_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_signal_outcomes (
+                id TEXT PRIMARY KEY,
+                origin TEXT NOT NULL,
+                backtest_run_id TEXT REFERENCES strategy_backtest_runs(id) ON DELETE CASCADE,
+                strategy_profile TEXT NOT NULL DEFAULT 'mainboard_volume_price',
+                signal_date DATE NOT NULL,
+                symbol TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                stage TEXT NOT NULL,
+                total_score NUMERIC(10, 4) NOT NULL DEFAULT 0,
+                accumulation_score NUMERIC(10, 4) NOT NULL DEFAULT 0,
+                launch_score NUMERIC(10, 4) NOT NULL DEFAULT 0,
+                theme_score NUMERIC(10, 4) NOT NULL DEFAULT 0,
+                risk_penalty NUMERIC(10, 4) NOT NULL DEFAULT 0,
+                entry_date DATE,
+                entry_price NUMERIC(18, 4),
+                signal_close NUMERIC(18, 4),
+                included_primary BOOLEAN NOT NULL DEFAULT TRUE,
+                duplicate_reason TEXT NOT NULL DEFAULT '',
+                sample_quality TEXT NOT NULL DEFAULT '',
+                metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+                horizon_outcomes JSONB NOT NULL DEFAULT '{}'::jsonb,
+                source_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                limitations JSONB NOT NULL DEFAULT '[]'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_backtest_funnel (
+                backtest_run_id TEXT PRIMARY KEY REFERENCES strategy_backtest_runs(id) ON DELETE CASCADE,
+                counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
         conn.execute("ALTER TABLE stealth_scan_tasks ADD COLUMN IF NOT EXISTS requested_offset INTEGER NOT NULL DEFAULT 0;")
         conn.execute(
             """
@@ -499,6 +570,9 @@ def init_schema() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_bars_symbol_date ON daily_bars (symbol, trade_date DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_stealth_results_score ON stealth_scan_results (trading_day DESC, total_score DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_stealth_scan_tasks_updated ON stealth_scan_tasks (updated_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_backtests_created ON strategy_backtest_runs (created_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_outcomes_run ON strategy_signal_outcomes (backtest_run_id, signal_date DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy_outcomes_origin ON strategy_signal_outcomes (origin, signal_date DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_stealth_scan_failures_task ON stealth_scan_failures (task_id, resolved, created_at DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_stealth_scan_failures_symbol ON stealth_scan_failures (symbol, resolved);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_observation_user ON observation_list (user_id, updated_at DESC);")
