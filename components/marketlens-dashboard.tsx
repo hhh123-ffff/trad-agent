@@ -32,6 +32,7 @@ import { AgentConsole } from "@/components/agents/agent-console";
 import { DataSourceStatusPanel } from "@/components/data-sources/data-source-status";
 import { DailyOperations } from "@/components/tracking/daily-operations";
 import { ReplayView } from "@/components/views/replay-view";
+import { StrategyQuality } from "@/components/strategy/strategy-quality";
 import {
   approveAgentAction,
   askAssistant,
@@ -1371,6 +1372,7 @@ function StealthPanel({
 
   return (
     <section className="panel rounded-lg p-4 lg:p-5">
+      <StrategyQuality />
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-start">
         <SectionTitle icon={Target} title="潜伏挖掘" aside={`${candidates.length} 个候选`} />
         <div className="flex flex-wrap gap-2">

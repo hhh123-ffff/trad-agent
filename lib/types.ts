@@ -285,6 +285,89 @@ export interface StealthCandidateDetail {
   source_refs: SourceRef[];
 }
 
+export type StrategyBacktestRunStatus = "queued" | "running" | "completed" | "failed";
+
+export interface StrategyBacktestRequest {
+  start_date?: string;
+  end_date?: string;
+  symbols?: string[];
+  repeat_days?: number;
+}
+
+export interface StrategyBacktestRun {
+  id: string;
+  strategy_profile: string;
+  status: StrategyBacktestRunStatus;
+  start_date: string | null;
+  end_date: string | null;
+  horizons: number[];
+  repeat_days: number;
+  requested_symbols: string[];
+  total_symbols: number;
+  total_symbol_days: number;
+  evaluated_symbol_days: number;
+  raw_signals: number;
+  primary_signals: number;
+  mature_signals: number;
+  progress: number;
+  summary: Record<string, unknown>;
+  data_quality: Record<string, unknown>;
+  limitations: string[];
+  message: string;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
+}
+
+export interface StrategyBacktestFunnel {
+  backtest_run_id: string;
+  counts: Record<string, number>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StrategyBacktestDetail {
+  run: StrategyBacktestRun;
+  funnel: StrategyBacktestFunnel | null;
+}
+
+export interface StrategySignalOutcome {
+  id: string;
+  origin: "replay" | "live";
+  backtest_run_id: string | null;
+  strategy_profile: string;
+  signal_date: string;
+  symbol: string;
+  name: string;
+  stage: StealthStage;
+  total_score: number;
+  accumulation_score: number;
+  launch_score: number;
+  theme_score: number;
+  risk_penalty: number;
+  entry_date: string | null;
+  entry_price: number | null;
+  signal_close: number | null;
+  included_primary: boolean;
+  duplicate_reason: string;
+  sample_quality: string;
+  metrics: Record<string, unknown>;
+  horizon_outcomes: Record<string, Record<string, unknown>>;
+  source_ids: string[];
+  limitations: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StrategyLiveOutcomeSummary {
+  total_signals: number;
+  mature_signals: number;
+  summary: Record<string, unknown>;
+  limitations: string[];
+}
+
 export interface StealthScanRunResponse {
   trading_day: string;
   total: number;

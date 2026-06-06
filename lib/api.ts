@@ -22,6 +22,12 @@ import type {
   StealthScanFailure,
   StealthScanMonitor,
   StealthScanTask,
+  StrategyBacktestDetail,
+  StrategyBacktestFunnel,
+  StrategyBacktestRequest,
+  StrategyBacktestRun,
+  StrategyLiveOutcomeSummary,
+  StrategySignalOutcome,
   ObservationItem,
   ObservationJournalEntry,
   ObservationSummary,
@@ -157,6 +163,39 @@ export async function loadStealthDiagnostics(params?: { minScore?: number; limit
 
 export async function loadStealthCandidate(symbol: string) {
   return request<StealthCandidateDetail>(`/api/stealth/candidates/${encodeURIComponent(symbol)}`);
+}
+
+export async function runStrategyBacktest(payload: StrategyBacktestRequest = {}) {
+  return request<StrategyBacktestRun>("/api/strategy/backtests/run", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function loadLatestStrategyBacktest() {
+  return request<StrategyBacktestRun>("/api/strategy/backtests/latest");
+}
+
+export async function loadStrategyBacktestDetail(runId: string) {
+  return request<StrategyBacktestDetail>(`/api/strategy/backtests/${encodeURIComponent(runId)}`);
+}
+
+export async function loadStrategyBacktestSignals(runId: string, params?: { stage?: string; primaryOnly?: boolean; limit?: number; offset?: number }) {
+  const query = new URLSearchParams();
+  if (params?.stage) query.set("stage", params.stage);
+  if (params?.primaryOnly) query.set("primary_only", "true");
+  if (typeof params?.limit === "number") query.set("limit", params.limit.toString());
+  if (typeof params?.offset === "number") query.set("offset", params.offset.toString());
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request<StrategySignalOutcome[]>(`/api/strategy/backtests/${encodeURIComponent(runId)}/signals${suffix}`);
+}
+
+export async function loadStrategyBacktestFunnel(runId: string) {
+  return request<StrategyBacktestFunnel>(`/api/strategy/backtests/${encodeURIComponent(runId)}/funnel`);
+}
+
+export async function loadStrategyLiveOutcomes() {
+  return request<StrategyLiveOutcomeSummary>("/api/strategy/live-outcomes");
 }
 
 export async function runStealthScan(options?: number | { limit?: number; offset?: number; symbols?: string[] }) {

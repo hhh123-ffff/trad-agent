@@ -168,6 +168,7 @@ def test_aggregates_mature_primary_signals_and_sets_confidence():
     assert summary["confidence"] == "low"
     assert summary["horizons"]["5d"]["median_close_return_pct"] == 8
     assert summary["horizons"]["5d"]["outperformance_rate_pct"] == 100
+    assert summary["stages"]["启动确认"]["primary_signals"] == 1
 
 
 def test_syncs_live_candidates_and_refreshes_mature_outcomes(monkeypatch):

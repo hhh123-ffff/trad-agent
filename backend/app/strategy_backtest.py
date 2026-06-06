@@ -115,6 +115,7 @@ def deduplicate_signals(
 def aggregate_signal_outcomes(outcomes: Sequence[StrategySignalOutcome]) -> dict[str, Any]:
     primary = [item for item in outcomes if item.included_primary]
     horizon_summary: dict[str, dict[str, Any]] = {}
+    stage_summary: dict[str, dict[str, Any]] = {}
     mature_primary_ids: set[str] = set()
     for horizon in HORIZONS:
         key = f"{horizon}d"
@@ -146,6 +147,25 @@ def aggregate_signal_outcomes(outcomes: Sequence[StrategySignalOutcome]) -> dict
             "median_mae_pct": _rounded(median(float(item["mae_pct"]) for item in mature)),
         }
     sample_count = horizon_summary.get("5d", {}).get("mature_count", 0)
+    for stage in sorted({item.stage for item in primary}):
+        stage_items = [item for item in primary if item.stage == stage]
+        mature_5d = [
+            item.horizon_outcomes["5d"]
+            for item in stage_items
+            if item.horizon_outcomes.get("5d", {}).get("status") == "mature"
+        ]
+        stage_summary[stage] = {
+            "primary_signals": len(stage_items),
+            "mature_5d": len(mature_5d),
+            "median_5d_close_return_pct": _rounded(median(float(item["close_return_pct"]) for item in mature_5d))
+            if mature_5d
+            else None,
+            "outperformance_rate_pct": _rounded(
+                sum(bool(item.get("outperformed")) for item in mature_5d) / len(mature_5d) * 100
+            )
+            if mature_5d
+            else None,
+        }
     confidence = "high" if sample_count >= 100 else "medium" if sample_count >= 30 else "low"
     return {
         "total_signals": len(outcomes),
@@ -153,6 +173,7 @@ def aggregate_signal_outcomes(outcomes: Sequence[StrategySignalOutcome]) -> dict
         "mature_primary_signals": len(mature_primary_ids),
         "confidence": confidence,
         "horizons": horizon_summary,
+        "stages": stage_summary,
     }
 
 
