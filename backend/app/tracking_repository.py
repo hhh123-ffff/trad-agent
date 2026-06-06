@@ -10,8 +10,11 @@ from .database import connect
 from .market_provider import CN_TZ
 from .models import (
     AnnouncementItem,
+    AppNotification,
     DailyTrackingReport,
     JobRun,
+    JobRunDetail,
+    JobRunStep,
     MarketEvent,
     MarketIndex,
     MarketSnapshot,
@@ -89,6 +92,136 @@ def list_job_runs(limit: int = 40, job_name: str | None = None) -> list[JobRun]:
             tuple(params),
         ).fetchall()
     return [_job_run_from_row(row) for row in rows]
+
+
+def get_job_run(run_id: str) -> JobRun | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM job_runs WHERE id = %s", (run_id,)).fetchone()
+    return _job_run_from_row(row) if row else None
+
+
+def create_job_run_step(job_run_id: str, step_name: str, attempt: int = 1, status: str = "running") -> JobRunStep:
+    step_id = uuid4().hex
+    with connect() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO job_run_steps (id, job_run_id, step_name, status, attempt)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING *
+            """,
+            (step_id, job_run_id, step_name, status, attempt),
+        ).fetchone()
+    return _job_run_step_from_row(row)
+
+
+def finish_job_run_step(
+    step_id: str,
+    status: str,
+    *,
+    result_scope: dict[str, Any] | None = None,
+    error_code: str | None = None,
+    error: str | None = None,
+    retryable: bool = False,
+) -> JobRunStep:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            UPDATE job_run_steps
+            SET status = %s,
+                result_scope = COALESCE(%s, result_scope),
+                error_code = %s,
+                error = %s,
+                retryable = %s,
+                finished_at = NOW(),
+                duration_ms = GREATEST(EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER * 1000, 0),
+                updated_at = NOW()
+            WHERE id = %s
+            RETURNING *
+            """,
+            (status, _json(result_scope) if result_scope is not None else None, error_code, error, retryable, step_id),
+        ).fetchone()
+    return _job_run_step_from_row(row)
+
+
+def list_job_run_steps(job_run_id: str) -> list[JobRunStep]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM job_run_steps
+            WHERE job_run_id = %s
+            ORDER BY created_at ASC, attempt ASC
+            """,
+            (job_run_id,),
+        ).fetchall()
+    return [_job_run_step_from_row(row) for row in rows]
+
+
+def get_job_run_detail(run_id: str) -> JobRunDetail | None:
+    run = get_job_run(run_id)
+    if run is None:
+        return None
+    return JobRunDetail(run=run, steps=list_job_run_steps(run_id))
+
+
+def create_app_notification(
+    *,
+    notification_type: str,
+    severity: str,
+    title: str,
+    message: str,
+    related_job_run_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> AppNotification:
+    notification_id = uuid4().hex
+    with connect() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO app_notifications (
+                id, notification_type, severity, title, message, related_job_run_id, metadata
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING *
+            """,
+            (
+                notification_id,
+                notification_type,
+                severity,
+                title,
+                message,
+                related_job_run_id,
+                _json(metadata or {}),
+            ),
+        ).fetchone()
+    return _app_notification_from_row(row)
+
+
+def list_app_notifications(unread_only: bool = False, limit: int = 50) -> list[AppNotification]:
+    where = "WHERE read_at IS NULL" if unread_only else ""
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT * FROM app_notifications
+            {where}
+            ORDER BY created_at DESC
+            LIMIT %s
+            """,
+            (limit,),
+        ).fetchall()
+    return [_app_notification_from_row(row) for row in rows]
+
+
+def mark_app_notification_read(notification_id: str) -> AppNotification | None:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            UPDATE app_notifications
+            SET read_at = COALESCE(read_at, NOW())
+            WHERE id = %s
+            RETURNING *
+            """,
+            (notification_id,),
+        ).fetchone()
+    return _app_notification_from_row(row) if row else None
 
 
 def save_market_events(events: list[MarketEvent]) -> None:
@@ -371,6 +504,39 @@ def _job_run_from_row(row: dict[str, Any]) -> JobRun:
         error=row["error"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+    )
+
+
+def _job_run_step_from_row(row: dict[str, Any]) -> JobRunStep:
+    return JobRunStep(
+        id=row["id"],
+        job_run_id=row["job_run_id"],
+        step_name=row["step_name"],
+        status=row["status"],
+        attempt=int(row["attempt"] or 1),
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+        duration_ms=int(row["duration_ms"] or 0),
+        result_scope=row["result_scope"] or {},
+        error_code=row["error_code"],
+        error=row["error"],
+        retryable=bool(row["retryable"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _app_notification_from_row(row: dict[str, Any]) -> AppNotification:
+    return AppNotification(
+        id=row["id"],
+        notification_type=row["notification_type"],
+        severity=row["severity"],
+        title=row["title"],
+        message=row["message"],
+        related_job_run_id=row["related_job_run_id"],
+        metadata=row["metadata"] or {},
+        read_at=row["read_at"],
+        created_at=row["created_at"],
     )
 
 

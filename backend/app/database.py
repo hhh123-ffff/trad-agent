@@ -295,6 +295,41 @@ def init_schema() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS job_run_steps (
+                id TEXT PRIMARY KEY,
+                job_run_id TEXT NOT NULL REFERENCES job_runs(id) ON DELETE CASCADE,
+                step_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                attempt INTEGER NOT NULL DEFAULT 1,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                finished_at TIMESTAMPTZ,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                result_scope JSONB NOT NULL DEFAULT '{}'::jsonb,
+                error_code TEXT,
+                error TEXT,
+                retryable BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_notifications (
+                id TEXT PRIMARY KEY,
+                notification_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                title TEXT NOT NULL,
+                message TEXT NOT NULL,
+                related_job_run_id TEXT REFERENCES job_runs(id) ON DELETE SET NULL,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                read_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS market_snapshots (
                 id TEXT PRIMARY KEY,
                 captured_at TIMESTAMPTZ NOT NULL,
@@ -470,6 +505,10 @@ def init_schema() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_observation_journal_user_day ON observation_journal (user_id, trading_day DESC, updated_at DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_observation_journal_symbol_day ON observation_journal (symbol, trading_day DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_job_runs_name_started ON job_runs (job_name, started_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_job_run_steps_run ON job_run_steps (job_run_id, created_at ASC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_job_run_steps_name ON job_run_steps (job_run_id, step_name, attempt DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_app_notifications_created ON app_notifications (created_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_app_notifications_read ON app_notifications (read_at, created_at DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_market_snapshots_captured ON market_snapshots (captured_at DESC, interval);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_news_items_symbol_day ON news_items (symbol, published_at DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_announcement_items_symbol_day ON announcement_items (symbol, published_at DESC);")

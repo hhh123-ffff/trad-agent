@@ -536,10 +536,16 @@ class ProviderMeta(BaseModel):
     license_note: str
 
 
+JobRunStatus = Literal["queued", "running", "completed", "degraded", "failed", "skipped"]
+JobRunStepStatus = Literal["pending", "running", "completed", "degraded", "failed", "skipped"]
+NotificationType = Literal["pipeline_completed", "pipeline_degraded", "pipeline_failed", "data_stale"]
+NotificationSeverity = Literal["info", "warning", "critical"]
+
+
 class JobRun(BaseModel):
     id: str
     job_name: str
-    status: Literal["queued", "running", "completed", "failed"]
+    status: JobRunStatus
     started_at: datetime
     finished_at: datetime | None = None
     duration_ms: int = 0
@@ -548,6 +554,40 @@ class JobRun(BaseModel):
     error: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class JobRunStep(BaseModel):
+    id: str
+    job_run_id: str
+    step_name: str
+    status: JobRunStepStatus
+    attempt: int = 1
+    started_at: datetime
+    finished_at: datetime | None = None
+    duration_ms: int = 0
+    result_scope: dict[str, Any] = Field(default_factory=dict)
+    error_code: str | None = None
+    error: str | None = None
+    retryable: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobRunDetail(BaseModel):
+    run: JobRun
+    steps: list[JobRunStep] = Field(default_factory=list)
+
+
+class AppNotification(BaseModel):
+    id: str
+    notification_type: NotificationType
+    severity: NotificationSeverity
+    title: str
+    message: str
+    related_job_run_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    read_at: datetime | None = None
+    created_at: datetime
 
 
 class MarketSnapshot(BaseModel):
