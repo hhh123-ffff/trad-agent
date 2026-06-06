@@ -82,6 +82,33 @@ def run_tracking_job(job_name: str) -> JobRun:
         _release_lock(lock_key, lock)
 
 
+def run_scheduled_tracking_job(job_name: str, *, now: datetime | None = None) -> JobRun:
+    normalized = _normalize_job_name(job_name)
+    if normalized not in JOB_SPECS:
+        raise KeyError(job_name)
+    target_date = (now or datetime.now(CN_TZ)).date()
+    if target_date.weekday() >= 5:
+        run = create_job_run(normalized, message=f"{JOB_SPECS[normalized]} scheduled run skipped.")
+        return finish_job_run(
+            run.id,
+            "skipped",
+            message="自动调度已跳过：当前日期不是交易工作日。",
+            affected_scope={"skip_reason": "non_trading_day", "target_date": target_date.isoformat()},
+        )
+
+    freshness = load_data_freshness_inputs()
+    confirmed_dates = {freshness.snapshot_date, freshness.daily_bar_date}
+    if target_date not in confirmed_dates:
+        run = create_job_run(normalized, message=f"{JOB_SPECS[normalized]} scheduled run skipped.")
+        return finish_job_run(
+            run.id,
+            "skipped",
+            message="自动调度已跳过：无法确认目标日期已有市场数据。",
+            affected_scope={"skip_reason": "trading_day_unconfirmed", "target_date": target_date.isoformat()},
+        )
+    return run_tracking_job(normalized)
+
+
 def recent_job_runs(limit: int = 40, job_name: str | None = None) -> list[JobRun]:
     return list_job_runs(limit=limit, job_name=_normalize_job_name(job_name) if job_name else None)
 

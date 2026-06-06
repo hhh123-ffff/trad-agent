@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from .tracking_service import run_tracking_job
+from .tracking_service import run_scheduled_tracking_job, run_tracking_job
 
 _scheduler = None
 
@@ -24,7 +24,7 @@ def start_scheduler() -> None:
     scheduler.add_job(lambda: run_tracking_job("midday_summary"), CronTrigger(hour=11, minute=35), id="midday_summary", replace_existing=True)
     scheduler.add_job(lambda: run_tracking_job("close_snapshot"), CronTrigger(hour=15, minute=5), id="close_snapshot", replace_existing=True)
     scheduler.add_job(lambda: run_tracking_job("news_explain"), CronTrigger(hour=16, minute=30), id="news_explain", replace_existing=True)
-    scheduler.add_job(lambda: run_tracking_job("post_market_replay"), CronTrigger(day_of_week="mon-fri", hour=20, minute=10), id="post_market_replay", replace_existing=True)
+    scheduler.add_job(lambda: run_scheduled_tracking_job("post_market_replay"), CronTrigger(day_of_week="mon-fri", hour=20, minute=10), id="post_market_replay", replace_existing=True)
     scheduler.add_job(lambda: run_tracking_job("daily_report"), CronTrigger(hour=20, minute=30), id="daily_report", replace_existing=True)
     scheduler.add_job(lambda: run_tracking_job("agent_post_market"), CronTrigger(day_of_week="mon-fri", hour=20, minute=40), id="agent_post_market", replace_existing=True)
     scheduler.start()
