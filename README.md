@@ -131,6 +131,36 @@ MARKETLENS_POST_MARKET_SCAN_OFFSET=0
 
 Set `MARKETLENS_POST_MARKET_SCAN_LIMIT=full` after the database and data provider are stable enough for a full-market scan.
 
+## Daily operational loop
+
+The Data Status page now exposes a durable six-step post-market loop:
+
+1. `close_snapshot`
+2. `collect_information`
+3. `stealth_scan`
+4. `observation_journal`
+5. `daily_report`
+6. `agent_post_market`
+
+Run it manually:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/admin/jobs/run/post_market_replay
+```
+
+Inspect a run and rerun a failed or degraded step:
+
+```bash
+curl http://127.0.0.1:8000/api/admin/jobs/runs/<run_id>
+curl -X POST http://127.0.0.1:8000/api/admin/jobs/runs/<run_id>/steps/collect_information/rerun
+```
+
+`completed` means all steps and freshness checks passed. `degraded` means the deterministic daily report is available but one or more sources, optional steps, or freshness checks have gaps. `failed` means the deterministic daily report could not be generated. `skipped` records an intentional scheduler guard or disabled capability.
+
+The scheduler remains disabled by default. Set `MARKETLENS_ENABLE_SCHEDULER=1` only for an always-on local deployment. Scheduled post-market replay records an explicit skipped run on weekends or when the current market date cannot be confirmed. Manual runs remain available for recovery and testing.
+
+All outputs remain research-only fact organization, structured replay, and risk disclosure. They do not provide buy/sell instructions, target prices, position sizing, or return promises.
+
 ## Stealth Discovery
 
 The `#stealth` page adds a research-only candidate scanner for “潜伏观察 / 启动确认 / 过热排除”.

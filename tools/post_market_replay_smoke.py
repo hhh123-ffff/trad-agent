@@ -40,13 +40,29 @@ def main() -> int:
         os.environ["MARKETLENS_POST_MARKET_ENABLE_SCAN"] = "1"
 
     from backend.app.repositories import ensure_storage
+    from backend.app.tracking_repository import get_job_run_detail, list_app_notifications
     from backend.app.tracking_service import run_tracking_job, tracking_daily_report
 
     ensure_storage()
     run = run_tracking_job("post_market_replay")
+    detail = get_job_run_detail(run.id)
     report = tracking_daily_report()
+    notifications = [item for item in list_app_notifications(limit=20) if item.related_job_run_id == run.id]
     payload = {
         "run": _jsonable(run),
+        "steps": [
+            {
+                "name": step.step_name,
+                "status": step.status,
+                "attempt": step.attempt,
+                "error_code": step.error_code,
+                "retryable": step.retryable,
+                "result_scope": step.result_scope,
+            }
+            for step in (detail.steps if detail else [])
+        ],
+        "freshness": run.affected_scope.get("data_freshness", {}),
+        "notifications": [_jsonable(item) for item in notifications],
         "report": {
             "trading_day": report.trading_day.isoformat(),
             "headline": report.headline,
@@ -64,7 +80,7 @@ def main() -> int:
         },
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
-    return 0 if run.status == "completed" and len(report.sections) == 6 and report.source_ids else 1
+    return 0 if run.status != "failed" and len(report.sections) == 6 and report.source_ids else 1
 
 
 if __name__ == "__main__":
