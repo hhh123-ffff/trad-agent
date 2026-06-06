@@ -184,3 +184,25 @@ def test_post_market_replay_uses_successful_steps_as_freshness_coverage(monkeypa
         assert inputs.agent_report_date == TRADING_DAY
     finally:
         _delete_run(run.id)
+
+
+def test_post_market_replay_degrades_scan_when_live_outcome_sync_fails(monkeypatch):
+    calls: list[str] = []
+    _install_successful_steps(monkeypatch, calls)
+    monkeypatch.setattr(
+        tracking_service,
+        "sync_live_signal_outcomes",
+        lambda _: (_ for _ in ()).throw(RuntimeError("live outcome storage unavailable")),
+    )
+
+    run = tracking_service.run_tracking_job("post_market_replay")
+    try:
+        steps = list_job_run_steps(run.id)
+        scan = next(step for step in steps if step.step_name == "stealth_scan")
+        assert run.status == "degraded"
+        assert scan.status == "degraded"
+        assert "live outcome storage unavailable" in scan.result_scope["live_outcomes_error"]
+        assert "daily_report" in calls
+        assert "agent_post_market" in calls
+    finally:
+        _delete_run(run.id)

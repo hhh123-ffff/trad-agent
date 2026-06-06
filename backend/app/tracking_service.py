@@ -20,6 +20,7 @@ from .notification_service import create_freshness_notification, create_pipeline
 from .repositories import list_watchlist
 from .stealth_repository import list_candidates, list_observations, snapshot_observation_journal
 from .stealth_scanner import run_stealth_scan
+from .strategy_backtest import sync_live_signal_outcomes
 from .tracking_repository import (
     create_job_run,
     finish_job_run,
@@ -157,7 +158,15 @@ def rerun_tracking_job_step(run_id: str, step_name: str):
                 active_themes=[],
                 include_watchlist=True,
             )
-            return StepOutcome(result_scope={"trading_day": result.trading_day.isoformat(), "saved": result.saved, "failed": result.failed})
+            live = sync_live_signal_outcomes(result.trading_day)
+            return StepOutcome(
+                result_scope={
+                    "trading_day": result.trading_day.isoformat(),
+                    "saved": result.saved,
+                    "failed": result.failed,
+                    "live_outcomes": live.total_signals,
+                }
+            )
         if step_name == "observation_journal":
             return StepOutcome(result_scope={"observation_journal": len(snapshot_observation_journal())})
         if step_name == "daily_report":
@@ -714,7 +723,16 @@ def _durable_post_market_replay_job(job_run_id: str) -> tuple[dict[str, object],
             active_themes=list(state["active_themes"]),
             include_watchlist=True,
         )
+        live_scope: dict[str, object] = {}
+        status = "completed"
+        try:
+            live = sync_live_signal_outcomes(result.trading_day)
+            live_scope = {"live_outcomes": live.total_signals, "live_mature_outcomes": live.mature_signals}
+        except Exception as exc:
+            status = "degraded"
+            live_scope = {"live_outcomes_error": str(exc)}
         return StepOutcome(
+            status=status,
             result_scope={
                 "trading_day": result.trading_day.isoformat(),
                 "total": result.total,
@@ -722,6 +740,7 @@ def _durable_post_market_replay_job(job_run_id: str) -> tuple[dict[str, object],
                 "saved": result.saved,
                 "failed": result.failed,
                 "stages": result.stages,
+                **live_scope,
             }
         )
 
@@ -854,6 +873,12 @@ def _run_post_market_scan(active_themes: list[str]) -> dict[str, object]:
             "limit": limit or "full",
             "offset": offset,
         }
+    live_scope: dict[str, object]
+    try:
+        live = sync_live_signal_outcomes(result.trading_day)
+        live_scope = {"live_outcomes": live.total_signals, "live_mature_outcomes": live.mature_signals}
+    except Exception as exc:
+        live_scope = {"live_outcomes_error": str(exc)}
     return {
         "status": "completed",
         "trading_day": result.trading_day.isoformat(),
@@ -864,6 +889,7 @@ def _run_post_market_scan(active_themes: list[str]) -> dict[str, object]:
         "stages": result.stages,
         "limit": limit or "full",
         "offset": offset,
+        **live_scope,
     }
 
 

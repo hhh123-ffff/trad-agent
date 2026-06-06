@@ -9,6 +9,7 @@ from backend.app.strategy_backtest import (
     deduplicate_signals,
     estimate_float_market_cap_billion,
     replay_symbol_history,
+    sync_live_signal_outcomes,
 )
 
 
@@ -167,3 +168,55 @@ def test_aggregates_mature_primary_signals_and_sets_confidence():
     assert summary["confidence"] == "low"
     assert summary["horizons"]["5d"]["median_close_return_pct"] == 8
     assert summary["horizons"]["5d"]["outperformance_rate_pct"] == 100
+
+
+def test_syncs_live_candidates_and_refreshes_mature_outcomes(monkeypatch):
+    start = date(2026, 1, 1)
+    bars = [
+        _bar(start, close=10),
+        _bar(start + timedelta(days=1), open_price=10, high=11, low=9.8, close=10.5),
+        _bar(start + timedelta(days=2), open_price=10.5, high=11.5, low=10.2, close=11),
+    ]
+    candidate = StealthCandidate(
+        trading_day=start,
+        symbol="600001.SH",
+        name="测试股份",
+        stage="启动确认",
+        total_score=82,
+        accumulation_score=78,
+        launch_score=86,
+        theme_score=0,
+        risk_penalty=0,
+        evidence=["量价结构满足严格条件"],
+        risks=[],
+    )
+    saved: list[StrategySignalOutcome] = []
+    monkeypatch.setattr("backend.app.strategy_backtest.list_candidates", lambda **_: [candidate])
+    monkeypatch.setattr("backend.app.strategy_backtest.list_daily_bars", lambda *_args, **_kwargs: bars)
+    monkeypatch.setattr("backend.app.strategy_backtest.list_signal_outcomes", lambda **_: [])
+    monkeypatch.setattr("backend.app.strategy_backtest.save_signal_outcomes", lambda items: saved.extend(items))
+
+    summary = sync_live_signal_outcomes(start)
+
+    assert summary.total_signals == 1
+    assert saved[0].origin == "live"
+    assert saved[0].backtest_run_id is None
+    assert saved[0].entry_date == start + timedelta(days=1)
+    assert saved[0].horizon_outcomes["1d"]["status"] == "mature"
+    assert saved[0].horizon_outcomes["5d"]["status"] == "immature"
+
+
+def test_live_sync_does_not_fabricate_outcomes_when_signal_bar_is_missing(monkeypatch):
+    signal = _outcome(date(2026, 1, 1))
+    signal.origin = "live"
+    saved: list[StrategySignalOutcome] = []
+    monkeypatch.setattr("backend.app.strategy_backtest.list_candidates", lambda **_: [])
+    monkeypatch.setattr("backend.app.strategy_backtest.list_signal_outcomes", lambda **_: [signal])
+    monkeypatch.setattr("backend.app.strategy_backtest.list_daily_bars", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("backend.app.strategy_backtest.save_signal_outcomes", lambda items: saved.extend(items))
+
+    sync_live_signal_outcomes(date(2026, 1, 2))
+
+    assert saved[0].entry_price is None
+    assert saved[0].horizon_outcomes == {}
+    assert "信号日日线缺失" in saved[0].limitations

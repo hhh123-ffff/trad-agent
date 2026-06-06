@@ -5,8 +5,10 @@ from datetime import date
 from statistics import median
 from typing import Any, Callable, Sequence
 
-from .models import DailyBar, StealthCandidate, StockUniverseItem, StrategySignalOutcome
+from .models import DailyBar, StealthCandidate, StockUniverseItem, StrategyLiveOutcomeSummary, StrategySignalOutcome
+from .stealth_repository import list_candidates, list_daily_bars
 from .stealth_scanner import evaluate_candidate
+from .strategy_backtest_repository import list_signal_outcomes, save_signal_outcomes
 
 
 HORIZONS = (1, 3, 5, 10)
@@ -225,3 +227,72 @@ def replay_symbol_history(
         "primary_signals": sum(item.included_primary for item in outcomes),
         **{f"stage_{stage}": count for stage, count in stage_counts.items()},
     }
+
+
+def sync_live_signal_outcomes(trading_day: date) -> StrategyLiveOutcomeSummary:
+    existing = {item.id: item for item in list_signal_outcomes(origin="live", limit=10_000)}
+    candidates = list_candidates(
+        trading_day=trading_day,
+        limit=10_000,
+        suppress_repeats=True,
+        repeat_days=3,
+    )
+    for candidate in candidates:
+        if candidate.stage not in SIGNAL_STAGES:
+            continue
+        outcome_id = f"live-mainboard_volume_price-{candidate.trading_day:%Y%m%d}-{candidate.symbol}-{candidate.stage}"
+        existing[outcome_id] = StrategySignalOutcome(
+            id=outcome_id,
+            origin="live",
+            signal_date=candidate.trading_day,
+            symbol=candidate.symbol,
+            name=candidate.name,
+            stage=candidate.stage,
+            total_score=candidate.total_score,
+            accumulation_score=candidate.accumulation_score,
+            launch_score=candidate.launch_score,
+            theme_score=candidate.theme_score,
+            risk_penalty=candidate.risk_penalty,
+            signal_close=float(candidate.metrics.get("close") or 0) or None,
+            metrics=candidate.metrics,
+            source_ids=candidate.source_ids,
+            limitations=["真实信号结果仅在后续交易日日线写入后更新。"],
+        )
+
+    refreshed: list[StrategySignalOutcome] = []
+    for outcome in existing.values():
+        bars = list_daily_bars(outcome.symbol, limit=5_000)
+        signal_index = next((index for index, bar in enumerate(bars) if bar.trade_date == outcome.signal_date), None)
+        if signal_index is None:
+            limitations = list(dict.fromkeys([*outcome.limitations, "信号日日线缺失"]))
+            refreshed.append(outcome.model_copy(update={"limitations": limitations}))
+            continue
+        calculated = calculate_horizon_outcomes(bars, signal_index)
+        horizons = calculated["horizons"]
+        sample_quality = (
+            "mature_10d"
+            if horizons["10d"]["status"] == "mature"
+            else "mature_5d"
+            if horizons["5d"]["status"] == "mature"
+            else "immature"
+        )
+        refreshed.append(
+            outcome.model_copy(
+                update={
+                    "entry_date": calculated["entry_date"],
+                    "entry_price": calculated["entry_price"],
+                    "signal_close": bars[signal_index].close,
+                    "sample_quality": sample_quality,
+                    "horizon_outcomes": horizons,
+                }
+            )
+        )
+    if refreshed:
+        save_signal_outcomes(refreshed)
+    summary = aggregate_signal_outcomes(refreshed)
+    return StrategyLiveOutcomeSummary(
+        total_signals=len(refreshed),
+        mature_signals=int(summary["mature_primary_signals"]),
+        summary=summary,
+        limitations=["真实信号样本与历史回放分开统计，样本量不足时结论置信度较低。"],
+    )
