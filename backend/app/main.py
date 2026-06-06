@@ -8,6 +8,8 @@ from time import monotonic
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from .agent_repository import apply_agent_action, get_agent_run_detail, list_agent_actions, list_agent_runs, set_agent_action_status
+from .agent_runtime import agent_usage_summary, run_research_query_agent
 from .agent_status import build_agent_statuses
 from .compliance import blocked_answer, check_text
 from .data_providers import (
@@ -29,7 +31,11 @@ from .market_provider import (
     live_source,
 )
 from .models import (
+    AgentAction,
+    AgentRun,
+    AgentRunDetail,
     AgentStatusResponse,
+    AgentUsageSummary,
     AnnouncementItem,
     AssistantAnswer,
     AssistantQuery,
@@ -327,8 +333,20 @@ def stock_profile(symbol: str) -> StockProfile:
 
 
 @app.get("/api/stealth/candidates", response_model=list[StealthCandidate])
-def stealth_candidates(stage: str | None = None, min_score: float = 0, limit: int = 50) -> list[StealthCandidate]:
-    return list_candidates(stage=stage, min_score=min_score, limit=min(max(limit, 1), 200))
+def stealth_candidates(
+    stage: str | None = None,
+    min_score: float = 0,
+    limit: int = 50,
+    suppress_repeats: bool = True,
+    repeat_days: int = 3,
+) -> list[StealthCandidate]:
+    return list_candidates(
+        stage=stage,
+        min_score=min_score,
+        limit=min(max(limit, 1), 200),
+        suppress_repeats=suppress_repeats,
+        repeat_days=min(max(repeat_days, 2), 10),
+    )
 
 
 @app.get("/api/stealth/diagnostics", response_model=list[StealthCandidate])
@@ -518,6 +536,45 @@ def admin_job_runs(limit: int = 40, job_name: str | None = None) -> list[JobRun]
     return recent_job_runs(limit=min(max(limit, 1), 200), job_name=job_name)
 
 
+@app.get("/api/agents/runs", response_model=list[AgentRun])
+def agent_runs(limit: int = 30) -> list[AgentRun]:
+    return list_agent_runs(limit=min(max(limit, 1), 100))
+
+
+@app.get("/api/agents/runs/{run_id}", response_model=AgentRunDetail)
+def agent_run_detail(run_id: str) -> AgentRunDetail:
+    detail = get_agent_run_detail(run_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Unknown Agent run.")
+    return detail
+
+
+@app.get("/api/agents/actions", response_model=list[AgentAction])
+def agent_actions(status: str | None = None, limit: int = 100) -> list[AgentAction]:
+    return list_agent_actions(status=status, limit=min(max(limit, 1), 300))
+
+
+@app.post("/api/agents/actions/{action_id}/approve", response_model=AgentAction)
+def approve_agent_action(action_id: str) -> AgentAction:
+    updated = apply_agent_action(action_id)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Pending Agent action not found.")
+    return updated
+
+
+@app.post("/api/agents/actions/{action_id}/reject", response_model=AgentAction)
+def reject_agent_action(action_id: str) -> AgentAction:
+    updated = set_agent_action_status(action_id, "rejected")
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Pending Agent action not found.")
+    return updated
+
+
+@app.get("/api/agents/usage", response_model=AgentUsageSummary)
+def agent_usage() -> AgentUsageSummary:
+    return agent_usage_summary()
+
+
 @app.post("/api/assistant/query", response_model=AssistantAnswer)
 def assistant_query(payload: AssistantQuery) -> AssistantAnswer:
     compliance = check_text(payload.query)
@@ -533,6 +590,11 @@ def assistant_query(payload: AssistantQuery) -> AssistantAnswer:
         )
         save_assistant_query(payload.query, answer)
         return answer
+
+    research_answer = run_research_query_agent(payload.query)
+    if research_answer is not None:
+        save_assistant_query(payload.query, research_answer)
+        return research_answer
 
     temperature, _, sectors, watchlist, events, source = current_market()
     top_sector = sectors[0]

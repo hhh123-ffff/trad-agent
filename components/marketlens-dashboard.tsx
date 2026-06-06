@@ -28,14 +28,20 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { AgentConsole } from "@/components/agents/agent-console";
 import { DataSourceStatusPanel } from "@/components/data-sources/data-source-status";
 import { ReplayView } from "@/components/views/replay-view";
 import {
+  approveAgentAction,
   askAssistant,
   createWatchlistItem,
   deleteStealthObservation,
   deleteWatchlistItem,
   loadAgents,
+  loadAgentActions,
+  loadAgentRunDetail,
+  loadAgentRuns,
+  loadAgentUsage,
   loadAdminJobRuns,
   loadDashboard,
   loadLatestStealthScanTask,
@@ -55,6 +61,7 @@ import {
   loadTrackingSnapshots,
   observeStealthCandidate,
   resolveStealthScanFailures,
+  rejectAgentAction,
   retryStealthScanFailures,
   runAdminJob,
   runStealthObservationScan,
@@ -63,7 +70,11 @@ import {
   updateStealthObservation
 } from "@/lib/api";
 import type {
+  AgentAction,
+  AgentRun,
+  AgentRunDetail,
   AgentStatusResponse,
+  AgentUsageSummary,
   AssistantAnswer,
   BriefItem,
   DashboardResponse,
@@ -101,6 +112,11 @@ type LoadState = {
   trackingEvents?: MarketEvent[];
   trackingSnapshots?: MarketSnapshot[];
   jobRuns?: JobRun[];
+  agentRuns?: AgentRun[];
+  agentActions?: AgentAction[];
+  agentUsage?: AgentUsageSummary;
+  agentRunDetail?: AgentRunDetail;
+  agentError?: string;
   trackingError?: string;
   error?: string;
 };
@@ -243,6 +259,8 @@ export function MarketLensDashboard() {
         if (mounted) setState((current) => ({ ...current, error: error.message }));
       });
 
+    void refreshAgentWorkspace();
+
     void Promise.all([loadTrackingDaily(), loadTrackingEvents(), loadTrackingSnapshots({ interval: "5m" }), loadAdminJobRuns({ limit: 12 })])
       .then(([trackingDaily, trackingEvents, trackingSnapshots, jobRuns]) => {
         if (mounted) setState((current) => ({ ...current, trackingDaily, trackingEvents, trackingSnapshots, jobRuns, trackingError: undefined }));
@@ -346,6 +364,7 @@ export function MarketLensDashboard() {
 
   async function refresh() {
     setState((current) => ({ ...current, error: undefined, trackingError: undefined }));
+    void refreshAgentWorkspace();
     const [
       dashboardResult,
       preopenResult,
@@ -486,12 +505,47 @@ export function MarketLensDashboard() {
     setState((current) => ({ ...current, trackingDaily, trackingEvents, trackingSnapshots, jobRuns, trackingError: undefined }));
   }
 
+  async function refreshAgentWorkspace() {
+    try {
+      const [agentRuns, agentActions, agentUsage] = await Promise.all([
+        loadAgentRuns(20),
+        loadAgentActions("pending"),
+        loadAgentUsage()
+      ]);
+      const agentRunDetail = agentRuns[0] ? await loadAgentRunDetail(agentRuns[0].id) : undefined;
+      setState((current) => ({ ...current, agentRuns, agentActions, agentUsage, agentRunDetail, agentError: undefined }));
+    } catch (error) {
+      const agentError = error instanceof Error ? error.message : "Agent 状态加载失败";
+      setState((current) => ({ ...current, agentError }));
+    }
+  }
+
+  async function approvePendingAgentAction(actionId: string) {
+    try {
+      await approveAgentAction(actionId);
+      await Promise.all([refreshAgentWorkspace(), refreshStealthCandidates()]);
+    } catch (error) {
+      const agentError = error instanceof Error ? error.message : "Agent 动作批准失败";
+      setState((current) => ({ ...current, agentError }));
+    }
+  }
+
+  async function rejectPendingAgentAction(actionId: string) {
+    try {
+      await rejectAgentAction(actionId);
+      await refreshAgentWorkspace();
+    } catch (error) {
+      const agentError = error instanceof Error ? error.message : "Agent 动作拒绝失败";
+      setState((current) => ({ ...current, agentError }));
+    }
+  }
+
   async function runTrackingJob(jobName: string) {
     setState((current) => ({ ...current, error: undefined, trackingError: undefined }));
     try {
       const run = await runAdminJob(jobName);
       setState((current) => ({ ...current, jobRuns: [run, ...(current.jobRuns ?? [])].slice(0, 12) }));
-      await refreshTrackingData();
+      await Promise.all([refreshTrackingData(), refreshAgentWorkspace()]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "跟踪任务运行失败";
       setState((current) => ({ ...current, error: message, trackingError: message }));
@@ -771,9 +825,10 @@ export function MarketLensDashboard() {
         onNavigate={navigate}
         onRefresh={() => void refresh()}
       />
-      <div className="ml-[112px] min-w-0 md:ml-[304px]">
+      <MobileNav activeView={activeView} onNavigate={navigate} />
+      <div className="min-w-0 md:ml-[248px]">
         <TopBar dashboard={dashboard} marketError={state.error} onRefresh={() => void refresh()} />
-        <div className="mx-auto max-w-[1320px] px-4 py-5 lg:px-6">
+        <div className="mx-auto max-w-[1600px] px-3 py-4 sm:px-4 lg:px-5">
           <ViewHeader item={activeItem} dashboard={dashboard} />
           <div className="mt-5">
             {activeView === "overview" && (dashboard ? <OverviewView dashboard={dashboard} /> : <MarketUnavailableNotice error={state.error} onRefresh={() => void refresh()} />)}
@@ -831,6 +886,7 @@ export function MarketLensDashboard() {
                   candidates={state.stealthCandidates ?? []}
                   observationSummary={state.stealthObservationSummary}
                   agents={state.agents}
+                  agentRunDetail={state.agentRunDetail}
                 />
               ) : (
                 <MarketUnavailableNotice error={state.error} onRefresh={() => void refresh()} />
@@ -860,6 +916,14 @@ export function MarketLensDashboard() {
                   sources={dashboard?.sources ?? []}
                   jobRuns={state.jobRuns ?? []}
                   onRunJob={(jobName) => void runTrackingJob(jobName)}
+                  agentRuns={state.agentRuns ?? []}
+                  agentActions={state.agentActions ?? []}
+                  agentUsage={state.agentUsage}
+                  agentRunDetail={state.agentRunDetail}
+                  agentError={state.agentError}
+                  onRefreshAgents={() => void refreshAgentWorkspace()}
+                  onApproveAction={(actionId) => void approvePendingAgentAction(actionId)}
+                  onRejectAction={(actionId) => void rejectPendingAgentAction(actionId)}
                 />
               ) : (
                 <MarketUnavailableNotice error={state.error} onRefresh={() => void refresh()} />
@@ -877,14 +941,14 @@ function TopBar({ dashboard, marketError, onRefresh }: { dashboard?: DashboardRe
   const asOf = source?.as_of ?? dashboard?.temperature.updated_at ?? new Date().toISOString();
 
   return (
-    <header className="border-b border-ink/10 bg-paper/90 backdrop-blur">
-      <div className="mx-auto flex max-w-[1500px] flex-col gap-3 px-4 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-6">
+    <header className="border-b border-ink/10 bg-white/95 backdrop-blur">
+      <div className="mx-auto flex max-w-[1600px] flex-col gap-3 px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between lg:px-5">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-pine text-white">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-pine text-white">
             <Activity size={23} />
           </div>
           <div>
-            <h1 className="text-xl font-semibold tracking-normal text-ink">MarketLens 盘面助手</h1>
+            <h1 className="text-lg font-semibold tracking-normal text-ink">MarketLens 盘面助手</h1>
             <p className="text-xs text-muted">
               {dashboard?.disclaimer ?? "本产品仅做公开/授权信息整理和复盘辅助，不构成证券投资建议、收益承诺、目标价或交易指令。"}
             </p>
@@ -933,10 +997,10 @@ function AppSidebar({
   const healthyAgents = agents?.agents.filter((agent) => agent.status === "healthy").length ?? 0;
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 flex w-[112px] flex-col border-r border-ink/10 bg-paper/95 md:w-[304px]">
-      <div className="flex h-full flex-col px-2 py-4 md:px-4 md:py-5">
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-[248px] flex-col border-r border-ink/10 bg-white/95 md:flex">
+      <div className="flex h-full flex-col px-3 py-4">
         <div className="flex items-center justify-center gap-3 border-b border-ink/10 pb-4 md:justify-start md:pb-5">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-pine text-white">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-pine text-white">
             <Activity size={23} />
           </div>
           <div className="hidden min-w-0 md:block">
@@ -945,19 +1009,19 @@ function AppSidebar({
           </div>
         </div>
 
-        <nav className="mt-5 space-y-5">
+        <nav className="mt-4 space-y-4">
           <SidebarGroup title="分析部分" items={analysisNav} activeView={activeView} onNavigate={onNavigate} />
           <SidebarGroup title="自选股部分" items={watchlistNav} activeView={activeView} onNavigate={onNavigate} />
           <SidebarGroup title="系统部分" items={systemNav} activeView={activeView} onNavigate={onNavigate} />
         </nav>
 
-        <div className="mt-5 hidden space-y-3 md:block">
-          <div className="rounded-lg border border-ink/10 bg-white p-4">
+        <div className="mt-4 hidden space-y-3 md:block">
+          <div className="rounded-lg border border-ink/10 bg-paper/70 p-3">
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs text-muted">市场温度</span>
               <span className="rounded-md bg-pine/10 px-2 py-1 text-xs font-semibold text-pine">{dashboard?.temperature.label ?? "未连接"}</span>
             </div>
-            <p className="mt-2 text-4xl font-semibold text-ink">{dashboard?.temperature.score ?? "--"}</p>
+            <p className="mt-2 text-3xl font-semibold text-ink">{dashboard?.temperature.score ?? "--"}</p>
             <p className="mt-1 text-xs text-muted">
               上涨 {dashboard?.temperature.advancers ?? "--"} / 下跌 {dashboard?.temperature.decliners ?? "--"}
             </p>
@@ -972,7 +1036,7 @@ function AppSidebar({
         </div>
 
         <div className="mt-auto space-y-3 border-t border-ink/10 pt-4">
-          <div className="hidden items-start gap-2 rounded-lg border border-pine/20 bg-pine/10 p-3 text-xs leading-5 text-pine md:flex">
+          <div className="hidden items-start gap-2 rounded-lg border border-pine/20 bg-pine/10 p-2.5 text-xs leading-5 text-pine md:flex">
             <ShieldCheck className="mt-0.5 shrink-0" size={15} />
             <span>无本地假行情兜底；真实源不可用时页面会直接提示。</span>
           </div>
@@ -1299,9 +1363,10 @@ function StealthPanel({
   const summaryBuckets = observationSummary?.buckets.filter((bucket) => bucket.count > 0) ?? [];
   const summaryUpdatedAt = observationSummary?.updated_at ? formatTime(observationSummary.updated_at) : "--";
   const latestJournal = observationJournal.slice(0, 8);
+  const strategyMatched = candidates.filter((candidate) => candidate.metrics.strategy_profile === "mainboard_volume_price").length;
 
   return (
-    <section className="panel rounded-lg p-5">
+    <section className="panel rounded-lg p-4 lg:p-5">
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-start">
         <SectionTitle icon={Target} title="潜伏挖掘" aside={`${candidates.length} 个候选`} />
         <div className="flex flex-wrap gap-2">
@@ -1351,7 +1416,32 @@ function StealthPanel({
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mt-4 grid gap-3 xl:grid-cols-[1.25fr_0.75fr]">
+        <div className="rounded-md border border-ink/10 bg-paper/70 px-3 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-[11px] font-semibold uppercase text-muted">Strategy</p>
+              <h3 className="mt-1 text-sm font-semibold text-ink">主板量价启动</h3>
+            </div>
+            <span className="rounded-md border border-pine/20 bg-white px-2.5 py-1 text-xs font-semibold text-pine">
+              {strategyMatched}/{candidates.length || "--"} 命中画像
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {["沪深主板", "流通市值 50-200 亿", "涨幅 2.5%-6%", "换手 4%-12%", "量能台阶", "均线多头"].map((label) => (
+              <span key={label} className="rounded-md border border-ink/10 bg-white px-2 py-1 text-[11px] font-semibold text-muted">
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-md border border-signal/15 bg-signal/5 px-3 py-3 text-xs leading-5 text-signal">
+          <p className="font-semibold">重复过滤已开启</p>
+          <p className="mt-1 text-signal/80">同一股票连续 3 天同阶段且未加入观察池时，默认不在主候选表重复刷屏。</p>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StealthMetric label="潜伏观察" value={(stageCounts["潜伏观察"] ?? 0).toString()} />
         <StealthMetric label="启动确认" value={(stageCounts["启动确认"] ?? 0).toString()} tone="signal" />
         <StealthMetric label="过热排除" value={(stageCounts["过热排除"] ?? 0).toString()} tone="danger" />
@@ -1741,9 +1831,9 @@ function StealthPanel({
         </div>
       )}
 
-      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+      <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
         <div className="overflow-x-auto rounded-lg border border-ink/10 bg-white">
-          <table className="dense-table min-w-[900px]">
+          <table className="dense-table min-w-[1080px]">
             <thead>
               <tr>
                 <th>候选</th>
@@ -1753,6 +1843,7 @@ function StealthPanel({
                 <th>启动</th>
                 <th>题材</th>
                 <th>风险</th>
+                <th>规则命中</th>
                 <th>证据摘要</th>
                 <th>观察</th>
               </tr>
@@ -1780,6 +1871,9 @@ function StealthPanel({
                   <td>{candidate.launch_score.toFixed(0)}</td>
                   <td>{candidate.theme_score.toFixed(0)}</td>
                   <td className={candidate.risk_penalty >= 35 ? "text-danger" : "text-muted"}>{candidate.risk_penalty.toFixed(0)}</td>
+                  <td className="min-w-[220px]">
+                    <RuleTagList tags={strategyRuleTags(candidate)} />
+                  </td>
                   <td className="max-w-[300px] text-muted">{candidate.evidence[0] ?? "等待更多证据"}</td>
                   <td>
                     <button
@@ -1798,7 +1892,7 @@ function StealthPanel({
               ))}
               {candidates.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="text-muted">
+                  <td colSpan={10} className="text-muted">
                     暂无潜伏候选。可以运行扫描；如果历史源不可用，会明确提示，不使用本地假候选。
                   </td>
                 </tr>
@@ -1807,7 +1901,7 @@ function StealthPanel({
           </table>
         </div>
 
-        <div className="rounded-lg border border-ink/10 bg-white p-4">
+        <div className="rounded-lg border border-ink/10 bg-white p-4 xl:sticky xl:top-20 xl:self-start">
           {activeCandidate ? (
             <div>
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1839,6 +1933,11 @@ function StealthPanel({
                 <InfoBlock label="启动分" value={activeCandidate.launch_score.toFixed(0)} />
                 <InfoBlock label="题材分" value={activeCandidate.theme_score.toFixed(0)} />
                 <InfoBlock label="风险扣分" value={activeCandidate.risk_penalty.toFixed(0)} tone="danger" />
+                <InfoBlock label="流通市值" value={metricText(activeCandidate, "float_market_cap_billion", "亿")} />
+                <InfoBlock label="换手/量比" value={`${metricText(activeCandidate, "turnover_rate", "%")} / ${metricText(activeCandidate, "volume_ratio")}`} />
+              </div>
+              <div className="mt-3">
+                <RuleTagList tags={strategyRuleTags(activeCandidate)} />
               </div>
               <div className="mt-4 h-48 rounded-lg border border-ink/10 bg-paper/60 p-3">
                 {chartData.length ? (
@@ -1889,11 +1988,72 @@ function StealthPanel({
 function StealthMetric({ label, value, tone }: { label: string; value: string; tone?: "signal" | "danger" }) {
   const color = tone === "signal" ? "text-signal" : tone === "danger" ? "text-danger" : "text-ink";
   return (
-    <div className="rounded-lg border border-ink/10 bg-white p-4">
+    <div className="rounded-lg border border-ink/10 bg-white p-3">
       <p className="text-xs text-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold ${color}`}>{value}</p>
+      <p className={`mt-1 text-xl font-semibold ${color}`}>{value}</p>
     </div>
   );
+}
+
+function RuleTagList({ tags }: { tags: Array<{ label: string; tone?: "pass" | "warn" | "risk" }> }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {tags.map((tag) => (
+        <span key={tag.label} className={`rounded-md border px-2 py-1 text-[11px] font-semibold ${ruleTagTone(tag.tone)}`}>
+          {tag.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function strategyRuleTags(candidate: StealthCandidate): Array<{ label: string; tone?: "pass" | "warn" | "risk" }> {
+  const metrics = candidate.metrics;
+  const tags: Array<{ label: string; tone?: "pass" | "warn" | "risk" }> = [];
+  tags.push({ label: metrics.mainboard_match === "yes" ? "主板" : "非主板", tone: metrics.mainboard_match === "yes" ? "pass" : "risk" });
+  tags.push({ label: metricText(candidate, "float_market_cap_billion", "亿"), tone: inRange(numberMetric(metrics.float_market_cap_billion), 50, 200) ? "pass" : "warn" });
+  tags.push({ label: `涨幅 ${metricText(candidate, "change_pct", "%")}`, tone: inRange(numberMetric(metrics.change_pct), 2.5, 6) ? "pass" : "warn" });
+  tags.push({ label: `换手 ${metricText(candidate, "turnover_rate", "%")}`, tone: inRange(numberMetric(metrics.turnover_rate), 4, 12) ? "pass" : "warn" });
+  tags.push({ label: metrics.amount_step_up === "yes" ? "量能台阶" : "量能待确认", tone: metrics.amount_step_up === "yes" ? "pass" : "warn" });
+  tags.push({ label: metrics.ma_alignment === "bullish" ? "均线多头" : "均线未齐", tone: metrics.ma_alignment === "bullish" ? "pass" : "warn" });
+  tags.push({ label: metrics.intraday_proxy === "strong_close" ? "分时代理强" : "分时缺口", tone: metrics.intraday_proxy === "strong_close" ? "pass" : "warn" });
+  return tags;
+}
+
+function ruleTagTone(tone?: "pass" | "warn" | "risk") {
+  if (tone === "risk") {
+    return "border-danger/20 bg-danger/5 text-danger";
+  }
+  if (tone === "warn") {
+    return "border-saffron/25 bg-saffron/10 text-[#8a5a12]";
+  }
+  return "border-pine/20 bg-pine/10 text-pine";
+}
+
+function metricText(candidate: StealthCandidate, key: string, suffix = "") {
+  const value = candidate.metrics[key];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return `${value.toFixed(value >= 100 ? 0 : 1)}${suffix}`;
+  }
+  if (typeof value === "string" && value) {
+    return `${value}${suffix}`;
+  }
+  return "--";
+}
+
+function numberMetric(value: string | number | undefined) {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function inRange(value: number, min: number, max: number) {
+  return value >= min && value <= max;
 }
 
 function ScoreBadge({ value }: { value: number }) {
@@ -2187,7 +2347,7 @@ function AssistantPanel({
 }) {
   return (
     <section className="panel rounded-lg p-5">
-      <SectionTitle icon={Bot} title="AI 研究助手" aside="引用 + 合规拦截" />
+      <SectionTitle icon={Bot} title="只读研究 Agent" aside="结构化上下文 + 引用 + 合规" />
       <div className="mt-4 flex flex-col gap-3 sm:flex-row">
         <input
           value={query}
@@ -2222,6 +2382,17 @@ function AssistantPanel({
                 </p>
               ))}
             </div>
+            {answer.missing_information.length > 0 && (
+              <div className="mt-4 border-t border-ink/10 pt-3">
+                <p className="text-xs font-semibold text-saffron">仍缺少的信息</p>
+                {answer.missing_information.map((item) => (
+                  <p key={item} className="mt-2 flex gap-2 text-xs leading-5 text-muted">
+                    <AlertTriangle className="mt-0.5 shrink-0 text-saffron" size={14} />
+                    {item}
+                  </p>
+                ))}
+              </div>
+            )}
             <div className="mt-4 flex flex-wrap gap-2">
               {answer.citations.map((citation) => (
                 <a
@@ -2246,27 +2417,57 @@ function DataStatusView({
   agents,
   sources,
   jobRuns,
-  onRunJob
+  onRunJob,
+  agentRuns,
+  agentActions,
+  agentUsage,
+  agentRunDetail,
+  agentError,
+  onRefreshAgents,
+  onApproveAction,
+  onRejectAction
 }: {
   agents: AgentStatusResponse;
   sources: SourceRef[];
   jobRuns: JobRun[];
   onRunJob: (jobName: string) => void;
+  agentRuns: AgentRun[];
+  agentActions: AgentAction[];
+  agentUsage?: AgentUsageSummary;
+  agentRunDetail?: AgentRunDetail;
+  agentError?: string;
+  onRefreshAgents: () => void;
+  onApproveAction: (actionId: string) => void;
+  onRejectAction: (actionId: string) => void;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_0.85fr]">
-      <div className="space-y-5">
-        <AgentPanel agents={agents} />
-        <DataSourceStatusPanel statuses={agents.data_source_statuses ?? []} />
-        <JobRunsPanel jobRuns={jobRuns} onRunJob={onRunJob} />
+    <div className="space-y-5">
+      <AgentConsole
+        runs={agentRuns}
+        detail={agentRunDetail}
+        actions={agentActions}
+        usage={agentUsage}
+        error={agentError}
+        onRun={() => onRunJob("agent_post_market")}
+        onRefresh={onRefreshAgents}
+        onApprove={onApproveAction}
+        onReject={onRejectAction}
+      />
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_0.85fr]">
+        <div className="space-y-5">
+          <AgentPanel agents={agents} />
+          <DataSourceStatusPanel statuses={agents.data_source_statuses ?? []} />
+          <JobRunsPanel jobRuns={jobRuns} onRunJob={onRunJob} />
+        </div>
+        <SourcePanel sources={sources} />
       </div>
-      <SourcePanel sources={sources} />
     </div>
   );
 }
 
 function JobRunsPanel({ jobRuns, onRunJob }: { jobRuns: JobRun[]; onRunJob: (jobName: string) => void }) {
   const jobs = [
+    { name: "agent_post_market", label: "盘后研究 Agent" },
     { name: "post_market_replay", label: "一键盘后复盘" },
     { name: "intraday_snapshot", label: "盘中快照" },
     { name: "close_snapshot", label: "收盘快照" },

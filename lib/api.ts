@@ -1,5 +1,9 @@
 import type {
+  AgentAction,
+  AgentRun,
+  AgentRunDetail,
   AgentStatusResponse,
+  AgentUsageSummary,
   AssistantAnswer,
   DashboardResponse,
   DailyTrackingReport,
@@ -67,6 +71,31 @@ export async function loadAgents() {
   return request<AgentStatusResponse>("/api/admin/agents");
 }
 
+export async function loadAgentRuns(limit = 20) {
+  return request<AgentRun[]>(`/api/agents/runs?limit=${limit}`);
+}
+
+export async function loadAgentRunDetail(runId: string) {
+  return request<AgentRunDetail>(`/api/agents/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function loadAgentActions(status = "pending") {
+  const suffix = status ? `?status=${encodeURIComponent(status)}` : "";
+  return request<AgentAction[]>(`/api/agents/actions${suffix}`);
+}
+
+export async function loadAgentUsage() {
+  return request<AgentUsageSummary>("/api/agents/usage");
+}
+
+export async function approveAgentAction(actionId: string) {
+  return request<AgentAction>(`/api/agents/actions/${encodeURIComponent(actionId)}/approve`, { method: "POST" });
+}
+
+export async function rejectAgentAction(actionId: string) {
+  return request<AgentAction>(`/api/agents/actions/${encodeURIComponent(actionId)}/reject`, { method: "POST" });
+}
+
 export async function askAssistant(query: string) {
   return request<AssistantAnswer>("/api/assistant/query", {
     method: "POST",
@@ -91,7 +120,7 @@ export async function loadWatchlist() {
   return request<WatchlistResponse>("/api/watchlist");
 }
 
-export async function loadStealthCandidates(params?: { stage?: string; minScore?: number; limit?: number }) {
+export async function loadStealthCandidates(params?: { stage?: string; minScore?: number; limit?: number; suppressRepeats?: boolean; repeatDays?: number }) {
   const query = new URLSearchParams();
   if (params?.stage) {
     query.set("stage", params.stage);
@@ -101,6 +130,12 @@ export async function loadStealthCandidates(params?: { stage?: string; minScore?
   }
   if (typeof params?.limit === "number") {
     query.set("limit", params.limit.toString());
+  }
+  if (typeof params?.suppressRepeats === "boolean") {
+    query.set("suppress_repeats", String(params.suppressRepeats));
+  }
+  if (typeof params?.repeatDays === "number") {
+    query.set("repeat_days", params.repeatDays.toString());
   }
   const suffix = query.toString() ? `?${query.toString()}` : "";
   return request<StealthCandidate[]>(`/api/stealth/candidates${suffix}`);

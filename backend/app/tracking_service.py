@@ -43,6 +43,7 @@ JOB_SPECS: dict[str, str] = {
     "news_explain": "16:30 公告新闻收集与解释",
     "post_market_replay": "盘后一键复盘闭环",
     "daily_report": "20:30 每日跟踪报告",
+    "agent_post_market": "20:40 盘后研究 Agent 工作流",
 }
 
 REPORT_SECTION_TITLES = ["市场温度", "指数表现", "板块轮动", "盘中事件", "自选与观察池", "数据质量与缺口"]
@@ -536,6 +537,7 @@ def _job_handlers() -> dict[str, Callable[[], tuple[dict[str, object], str]]]:
         "news_explain": _news_job,
         "post_market_replay": _post_market_replay_job,
         "daily_report": _daily_report_job,
+        "agent_post_market": _agent_post_market_job,
     }
 
 
@@ -561,6 +563,22 @@ def _news_job() -> tuple[dict[str, object], str]:
 def _daily_report_job() -> tuple[dict[str, object], str]:
     report = build_daily_tracking_report()
     return {"trading_day": report.trading_day.isoformat(), "snapshots": len(report.snapshots), "events": len(report.events)}, "每日跟踪报告已生成。"
+
+
+def _agent_post_market_job() -> tuple[dict[str, object], str]:
+    from .agent_runtime import run_post_market_agent_workflow
+
+    run = run_post_market_agent_workflow(trigger="scheduled_job")
+    scope: dict[str, object] = {
+        "agent_run_id": run.id,
+        "agent_status": run.status,
+        "calls_used": run.calls_used,
+        "tokens_used": run.tokens_used,
+    }
+    message = "盘后研究 Agent 工作流已完成。"
+    if run.status == "degraded":
+        message = "盘后研究 Agent 工作流已降级完成，确定性日报仍可用。"
+    return scope, message
 
 
 def _post_market_replay_job() -> tuple[dict[str, object], str]:

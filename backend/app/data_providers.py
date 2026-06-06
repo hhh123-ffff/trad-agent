@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import Any, Protocol
 
 import requests
@@ -331,6 +331,99 @@ class TonghuashunNewsAnnouncementProvider:
         return self.client.announcements(symbols)
 
 
+class AkshareCninfoAnnouncementProvider:
+    name = "akshare-cninfo-announcement"
+    source_id = "src-cninfo-announcement"
+
+    def __init__(
+        self,
+        *,
+        market: str | None = None,
+        keyword: str | None = None,
+        category: str | None = None,
+        lookback_days: int | None = None,
+        limit: int | None = None,
+    ):
+        self.market = market if market is not None else os.getenv("AKSHARE_CNINFO_ANNOUNCEMENT_MARKET", "沪深京")
+        self.keyword = keyword if keyword is not None else os.getenv("AKSHARE_CNINFO_ANNOUNCEMENT_KEYWORD", "")
+        self.category = category if category is not None else os.getenv("AKSHARE_CNINFO_ANNOUNCEMENT_CATEGORY", "")
+        self.lookback_days = (
+            max(0, int(os.getenv("AKSHARE_CNINFO_ANNOUNCEMENT_LOOKBACK_DAYS", "1")))
+            if lookback_days is None
+            else max(0, lookback_days)
+        )
+        self.limit = max(1, limit if limit is not None else int(os.getenv("AKSHARE_CNINFO_ANNOUNCEMENT_LIMIT", "500")))
+
+    def news(self, symbols: list[str] | None = None) -> list[NewsItem]:
+        return []
+
+    def announcements(self, symbols: list[str] | None = None) -> list[AnnouncementItem]:
+        requested_codes = sorted(_symbol_codes(symbols))
+        if not requested_codes:
+            return []
+
+        today = datetime.now(CN_TZ).date()
+        start_date = (today - timedelta(days=self.lookback_days)).strftime("%Y%m%d")
+        end_date = today.strftime("%Y%m%d")
+        items: list[AnnouncementItem] = []
+        seen_ids: set[str] = set()
+        errors: list[str] = []
+
+        for code in requested_codes:
+            try:
+                rows = _dataframe_records(
+                    _akshare_cninfo_disclosure_report(
+                        symbol=code,
+                        market=self.market,
+                        keyword=self.keyword,
+                        category=self.category,
+                        start_date=start_date,
+                        end_date=end_date,
+                    )
+                )
+            except Exception as exc:
+                errors.append(f"{code}: {exc}")
+                continue
+
+            for row in rows:
+                row_code = _plain_code(_first_text(row, "代码", "证券代码", "股票代码") or code)
+                if row_code not in requested_codes:
+                    continue
+                title = _first_text(row, "公告标题", "标题", "announcementTitle")
+                if not title:
+                    continue
+                normalized = _normalize_cninfo_symbol(row_code)
+                source_url = _first_text(row, "公告链接", "链接", "网址", "url")
+                published_at = _parse_datetime(_first_text(row, "公告时间", "公告日期", "time", "date"), fallback=datetime.combine(today, time(16), CN_TZ))
+                item_id = _stable_id("cninfo-announcement", normalized or row_code, title, published_at.isoformat(), source_url)
+                if item_id in seen_ids:
+                    continue
+                seen_ids.add(item_id)
+                name = _first_text(row, "简称", "股票简称", "证券简称", "name")
+                items.append(
+                    AnnouncementItem(
+                        id=item_id,
+                        symbol=normalized,
+                        title=title[:300],
+                        summary=(f"{name}：{title}" if name else title)[:800],
+                        published_at=published_at,
+                        source_url=source_url,
+                        source_name="巨潮资讯公告",
+                        event_type="announcement",
+                        importance=_announcement_importance(title),
+                        provider=self.name,
+                        source_id=self.source_id,
+                        license_note="巨潮资讯公开公告页面；通过 AKShare 封装，仅保存标题、时间、代码和链接。",
+                    )
+                )
+                if len(items) >= self.limit:
+                    return items
+
+        if not items and errors:
+            raise RuntimeError(f"AKShare CNInfo announcement request failed: {'; '.join(errors[:3])}")
+        return items
+
+
 class TushareNewsAnnouncementProvider:
     name = "tushare-pro-info"
 
@@ -487,6 +580,10 @@ def _normalize_tushare_symbol(symbol: str | None) -> str | None:
     return f"{code}.SZ"
 
 
+def _normalize_cninfo_symbol(symbol: str | None) -> str | None:
+    return _normalize_tushare_symbol(symbol)
+
+
 def _match_symbol(text: str, wanted_codes: set[str]) -> str | None:
     for code in wanted_codes:
         if code and code in text:
@@ -522,10 +619,30 @@ def _announcement_importance(title: str) -> str:
     return "high" if any(term in title for term in high_terms) else "medium"
 
 
+def _dataframe_records(frame: Any) -> list[dict[str, Any]]:
+    if frame is None:
+        return []
+    if hasattr(frame, "to_dict"):
+        return [dict(row) for row in frame.to_dict("records")]
+    if isinstance(frame, list):
+        return [dict(row) for row in frame if isinstance(row, dict)]
+    return []
+
+
+def _akshare_cninfo_disclosure_report(**kwargs: Any) -> Any:
+    try:
+        import akshare as ak
+    except Exception as exc:
+        raise RuntimeError("AKShare is not installed, cannot fetch CNInfo announcements.") from exc
+    return ak.stock_zh_a_disclosure_report_cninfo(**kwargs)
+
+
 def build_news_announcement_provider() -> NewsAnnouncementProvider:
     provider = os.getenv("MARKETLENS_INFO_PROVIDER", "dev").strip().lower()
     if provider in {"ths", "ths_quantapi", "tonghuashun", "ifind"}:
         return TonghuashunNewsAnnouncementProvider()
+    if provider in {"akshare", "akshare_cninfo", "akshare-cninfo", "cninfo"}:
+        return AkshareCninfoAnnouncementProvider()
     if provider == "tushare":
         return TushareNewsAnnouncementProvider()
     return DevNewsAnnouncementProvider()
@@ -565,6 +682,8 @@ def market_provider_sources() -> list[SourceRef]:
 def information_provider_sources() -> list[SourceRef]:
     if isinstance(news_announcement_provider, TonghuashunNewsAnnouncementProvider):
         return [ths_announcement_source()]
+    if isinstance(news_announcement_provider, AkshareCninfoAnnouncementProvider):
+        return [cninfo_announcement_source()]
     return []
 
 
@@ -578,6 +697,8 @@ def source_ref_for_id(source_id: str) -> SourceRef:
         return sina_source()
     if source_id == "src-ths-quantapi-announcement":
         return ths_announcement_source()
+    if source_id == "src-cninfo-announcement":
+        return cninfo_announcement_source()
     return ths_market_source() if source_id.startswith("src-ths-") else live_source()
 
 
@@ -605,6 +726,7 @@ def data_source_statuses() -> list[DataSourceStatus]:
     ths_market_providers = {"ths", "ths_delayed", "ths_quantapi", "tonghuashun", "ifind"}
     ths_history_providers = {"ths", "ths_delayed", "ths_quantapi", "tonghuashun", "ifind"}
     ths_info_providers = {"ths", "ths_quantapi", "tonghuashun", "ifind"}
+    akshare_info_providers = {"akshare", "akshare_cninfo", "akshare-cninfo", "cninfo"}
 
     if market_provider in ths_market_providers:
         statuses.append(
@@ -654,11 +776,37 @@ def data_source_statuses() -> list[DataSourceStatus]:
             )
         )
 
+    if info_provider in akshare_info_providers:
+        statuses.append(
+            DataSourceStatus(
+                id="src-cninfo-announcement",
+                name="AKShare CNInfo Announcements",
+                provider="akshare-cninfo-announcement",
+                status="configured",
+                capabilities={
+                    "announcements": "configured",
+                    "news": "not_enabled",
+                },
+                next_step="Run news_explain or post_market_replay after adding watchlist/observation symbols; requires outbound access to cninfo.com.cn.",
+            )
+        )
+
     return statuses
 
 
 def history_data_provider_source() -> SourceRef:
     return akshare_source()
+
+
+def cninfo_announcement_source() -> SourceRef:
+    return SourceRef(
+        id="src-cninfo-announcement",
+        name="巨潮资讯公告",
+        url="https://www.cninfo.com.cn/",
+        as_of=datetime.now(CN_TZ),
+        license="public-dev-source",
+        freshness="巨潮资讯公告查询；通过 AKShare 封装按股票代码拉取公告标题、时间和链接。",
+    )
 
 
 history_data_provider: HistoryDataProvider = build_history_data_provider()

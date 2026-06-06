@@ -149,6 +149,49 @@ def fetch_stock_universe() -> list[StockUniverseItem]:
     raise HistoryDataUnavailable(f"AKShare 股票列表不可用：{'; '.join(errors)}")
 
 
+def fetch_stock_market_profiles(symbols: list[str]) -> dict[str, dict[str, float]]:
+    if not symbols:
+        return {}
+    wanted = {symbol_code(symbol) for symbol in symbols}
+    ak = _ak()
+    try:
+        frame = ak.stock_zh_a_spot_em()
+    except Exception as exc:
+        raise HistoryDataUnavailable(f"AKShare 全市场实时画像不可用：{exc}") from exc
+    if frame is None or frame.empty:
+        raise HistoryDataUnavailable("AKShare 全市场实时画像为空。")
+
+    profiles: dict[str, dict[str, float]] = {}
+    for row in frame.to_dict("records"):
+        code = str(row.get("代码") or row.get("code") or "").strip()
+        if code not in wanted:
+            continue
+        float_market_cap = _row_number(row, "流通市值", "float_market_cap", "float_mv")
+        profiles[normalize_symbol(code)] = {
+            "float_market_cap_billion": round(float_market_cap / 100_000_000, 2) if float_market_cap > 10_000 else round(float_market_cap, 2),
+            "volume_ratio": _row_number(row, "量比", "volume_ratio", "vol_ratio"),
+            "turnover_rate": _row_number(row, "换手率", "turnover_rate"),
+            "change_pct": _row_number(row, "涨跌幅", "change_pct"),
+            "amount": _row_number(row, "成交额", "amount"),
+        }
+    return profiles
+
+
+def _row_number(row: dict[str, Any], *keys: str) -> float:
+    lowered = {str(key).lower(): value for key, value in row.items()}
+    for key in keys:
+        value = row.get(key)
+        if value is None:
+            value = lowered.get(key.lower())
+        if value in (None, "", "-"):
+            continue
+        try:
+            return float(str(value).replace(",", ""))
+        except ValueError:
+            continue
+    return 0.0
+
+
 def fetch_daily_bars(symbol: str, days: int = 250, adjust: str = "qfq") -> list[DailyBar]:
     return _fetch_hist_bars(symbol=symbol, period="daily", days=days, adjust=adjust)
 

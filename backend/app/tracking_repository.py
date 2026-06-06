@@ -7,6 +7,7 @@ from uuid import uuid4
 from psycopg.types.json import Jsonb
 
 from .database import connect
+from .market_provider import CN_TZ
 from .models import (
     AnnouncementItem,
     DailyTrackingReport,
@@ -32,7 +33,7 @@ def _dump(value: Any) -> Any:
 
 
 def _day_window(trading_day: date) -> tuple[datetime, datetime]:
-    start = datetime.combine(trading_day, time.min)
+    start = datetime.combine(trading_day, time.min, CN_TZ)
     return start, start + timedelta(days=1)
 
 

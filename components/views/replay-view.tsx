@@ -1,11 +1,12 @@
-import { PlayCircle } from "lucide-react";
+import { PlayCircle, Target } from "lucide-react";
 
+import { AgentBrief } from "@/components/agents/agent-brief";
 import { DataSourceStatusPanel } from "@/components/data-sources/data-source-status";
 import { CandidateFunnel } from "@/components/replay/candidate-funnel";
 import { DailyReportCard } from "@/components/replay/daily-report";
 import { InformationSummaryPanel } from "@/components/replay/information-summary";
 import { PostMarketPipeline } from "@/components/replay/job-pipeline";
-import type { AgentStatusResponse, DailyTrackingReport, JobRun, ObservationSummary, ReplayReport, StealthCandidate } from "@/lib/types";
+import type { AgentRunDetail, AgentStatusResponse, DailyTrackingReport, JobRun, ObservationSummary, ReplayReport, StealthCandidate } from "@/lib/types";
 
 export function ReplayView({
   replay,
@@ -14,7 +15,8 @@ export function ReplayView({
   trackingError,
   candidates,
   observationSummary,
-  agents
+  agents,
+  agentRunDetail
 }: {
   replay: ReplayReport;
   trackingDaily?: DailyTrackingReport;
@@ -23,7 +25,11 @@ export function ReplayView({
   candidates: StealthCandidate[];
   observationSummary?: ObservationSummary;
   agents?: AgentStatusResponse;
+  agentRunDetail?: AgentRunDetail;
 }) {
+  const strategyCandidates = candidates.filter((candidate) => candidate.metrics.strategy_profile === "mainboard_volume_price");
+  const launchCount = strategyCandidates.filter((candidate) => String(candidate.stage).includes("启动")).length;
+
   return (
     <section className="space-y-5">
       <div className="panel rounded-lg p-5">
@@ -48,6 +54,27 @@ export function ReplayView({
 
       <PostMarketPipeline jobRuns={jobRuns} />
       <DailyReportCard trackingDaily={trackingDaily} trackingError={trackingError} jobRuns={jobRuns} />
+      <AgentBrief detail={agentRunDetail} />
+
+      <section className="panel rounded-lg p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-pine/10 text-pine">
+              <Target size={18} />
+            </span>
+            <div>
+              <p className="text-xs font-semibold text-pine">主板量价启动摘要</p>
+              <h3 className="mt-1 text-base font-semibold">候选 {strategyCandidates.length} 个，启动确认 {launchCount} 个</h3>
+            </div>
+          </div>
+          <a
+            href="#stealth"
+            className="inline-flex min-h-9 items-center rounded-md border border-pine/25 bg-pine/5 px-3 text-sm font-semibold text-pine transition hover:bg-pine/10"
+          >
+            进入潜伏挖掘
+          </a>
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         <InformationSummaryPanel trackingDaily={trackingDaily} />

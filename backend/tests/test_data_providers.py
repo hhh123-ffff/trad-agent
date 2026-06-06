@@ -1,10 +1,12 @@
 from datetime import date
 
 from backend.app.data_providers import (
+    AkshareCninfoAnnouncementProvider,
     TonghuashunDelayedHistoryProvider,
     TushareNewsAnnouncementProvider,
     data_source_statuses,
     history_provider_sources,
+    information_provider_sources,
 )
 from backend.app.history_provider import HistoryDataUnavailable
 from backend.app.models import DailyBar
@@ -91,6 +93,66 @@ def test_tushare_provider_requires_token(monkeypatch):
         assert "TUSHARE_TOKEN" in str(exc)
     else:
         raise AssertionError("expected missing token error")
+
+
+def test_akshare_cninfo_announcement_provider_maps_and_filters_announcements(monkeypatch):
+    calls = []
+
+    class FakeFrame:
+        def to_dict(self, orient):
+            assert orient == "records"
+            return [
+                {
+                    "代码": "600000",
+                    "简称": "浦发银行",
+                    "公告标题": "浦发银行关于重大事项的公告",
+                    "公告时间": "2026-05-31 16:00:00",
+                    "公告链接": "https://static.cninfo.com.cn/finalpage/a.pdf",
+                },
+                {
+                    "代码": "000001",
+                    "简称": "平安银行",
+                    "公告标题": "平安银行普通公告",
+                    "公告时间": "2026-05-31 16:00:00",
+                    "公告链接": "https://static.cninfo.com.cn/finalpage/b.pdf",
+                },
+            ]
+
+    def fake_fetch(**kwargs):
+        calls.append(kwargs)
+        return FakeFrame()
+
+    monkeypatch.setattr("backend.app.data_providers._akshare_cninfo_disclosure_report", fake_fetch)
+    provider = AkshareCninfoAnnouncementProvider(category="公司治理", limit=10)
+
+    items = provider.announcements(["600000.SH"])
+
+    assert calls[0]["symbol"] == "600000"
+    assert calls[0]["market"] == "沪深京"
+    assert calls[0]["category"] == "公司治理"
+    assert items[0].symbol == "600000.SH"
+    assert items[0].importance == "high"
+    assert items[0].source_id == "src-cninfo-announcement"
+    assert items[0].provider == "akshare-cninfo-announcement"
+    assert len(items) == 1
+
+
+def test_akshare_cninfo_source_and_status(monkeypatch):
+    monkeypatch.setenv("MARKETLENS_INFO_PROVIDER", "akshare_cninfo")
+    monkeypatch.setattr(
+        "backend.app.data_providers.news_announcement_provider",
+        AkshareCninfoAnnouncementProvider(),
+    )
+
+    sources = information_provider_sources()
+    statuses = {status.id: status for status in data_source_statuses()}
+
+    assert sources[0].id == "src-cninfo-announcement"
+    assert statuses["src-cninfo-announcement"].status == "configured"
+    assert statuses["src-cninfo-announcement"].capabilities == {
+        "announcements": "configured",
+        "news": "not_enabled",
+    }
 
 
 def test_tonghuashun_quantapi_client_maps_history_bars(monkeypatch):

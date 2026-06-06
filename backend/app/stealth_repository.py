@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -532,6 +532,8 @@ def list_candidates(
     user_id: str = DEFAULT_USER_ID,
     include_insufficient: bool = False,
     diagnostic_only: bool = False,
+    suppress_repeats: bool = False,
+    repeat_days: int = 3,
 ) -> list[StealthCandidate]:
     day = trading_day or latest_trading_day()
     if day is None:
@@ -561,7 +563,51 @@ def list_candidates(
             """,
             tuple(params),
         ).fetchall()
-    return [_candidate_from_row(row) for row in rows]
+    candidates = [_candidate_from_row(row) for row in rows]
+    if suppress_repeats and not stage and not diagnostic_only:
+        candidates = _suppress_repeated_candidates(candidates, day, repeat_days=max(2, repeat_days), user_id=user_id)
+    return candidates
+
+
+def _suppress_repeated_candidates(
+    candidates: list[StealthCandidate],
+    trading_day: date,
+    *,
+    repeat_days: int,
+    user_id: str,
+) -> list[StealthCandidate]:
+    symbols = [candidate.symbol for candidate in candidates if not candidate.observed]
+    if not symbols:
+        return candidates
+    start_day = trading_day - timedelta(days=repeat_days - 1)
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT r.symbol, r.stage, r.trading_day, o.symbol IS NOT NULL AS observed
+            FROM stealth_scan_results r
+            LEFT JOIN observation_list o ON o.user_id = %s AND o.symbol = r.symbol
+            WHERE r.symbol = ANY(%s) AND r.trading_day >= %s AND r.trading_day <= %s
+            ORDER BY r.symbol, r.trading_day ASC
+            """,
+            (user_id, symbols, start_day, trading_day),
+        ).fetchall()
+    history: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        history.setdefault(row["symbol"], []).append(row)
+
+    visible: list[StealthCandidate] = []
+    for candidate in candidates:
+        if candidate.observed:
+            visible.append(candidate)
+            continue
+        rows_for_symbol = history.get(candidate.symbol, [])
+        days = {row["trading_day"] for row in rows_for_symbol}
+        same_stage = all(row["stage"] == candidate.stage for row in rows_for_symbol)
+        observed_any = any(bool(row["observed"]) for row in rows_for_symbol)
+        if len(days) >= repeat_days and same_stage and not observed_any:
+            continue
+        visible.append(candidate)
+    return visible
 
 
 def get_candidate(symbol: str, user_id: str = DEFAULT_USER_ID) -> StealthCandidate | None:

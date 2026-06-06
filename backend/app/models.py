@@ -236,6 +236,91 @@ class AssistantAnswer(BaseModel):
     disclaimer: str
 
 
+AgentRunStatus = Literal["running", "completed", "degraded", "failed"]
+AgentStepStatus = Literal["completed", "degraded", "failed", "skipped"]
+AgentActionStatus = Literal["pending", "approved", "rejected", "applied"]
+
+
+class AgentRun(BaseModel):
+    id: str
+    workflow: str
+    status: AgentRunStatus
+    trigger: str
+    summary: str = ""
+    error: str | None = None
+    calls_used: int = 0
+    tokens_used: int = 0
+    started_at: datetime
+    finished_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentStep(BaseModel):
+    id: str
+    run_id: str
+    agent_name: str
+    status: AgentStepStatus
+    tool_calls: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+    output: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
+    created_at: datetime
+
+
+class AgentArtifact(BaseModel):
+    id: str
+    run_id: str
+    artifact_type: str
+    title: str
+    content: dict[str, Any] = Field(default_factory=dict)
+    source_ids: list[str] = Field(default_factory=list)
+    created_at: datetime
+
+
+class AgentAction(BaseModel):
+    id: str
+    run_id: str
+    action_type: str
+    symbol: str | None = None
+    status: AgentActionStatus
+    payload: dict[str, Any] = Field(default_factory=dict)
+    rationale: str = ""
+    source_ids: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class LLMUsage(BaseModel):
+    id: str
+    run_id: str
+    agent_name: str
+    model: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    latency_ms: int = 0
+    success: bool = True
+    created_at: datetime
+
+
+class AgentRunDetail(BaseModel):
+    run: AgentRun
+    steps: list[AgentStep] = Field(default_factory=list)
+    artifacts: list[AgentArtifact] = Field(default_factory=list)
+    actions: list[AgentAction] = Field(default_factory=list)
+
+
+class AgentUsageSummary(BaseModel):
+    configured: bool
+    model: str = ""
+    daily_call_limit: int
+    calls_used_today: int
+    calls_remaining_today: int
+
+
 class ComplianceCheck(BaseModel):
     text: str
     allowed: bool

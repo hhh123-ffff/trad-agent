@@ -25,8 +25,9 @@ from backend.app.models import (
     ThemeMembership,
     WatchlistItemCreate,
 )
-from backend.app.stealth_repository import create_scan_task, record_scan_failure, save_daily_bars, save_scan_results
+from backend.app.stealth_repository import create_scan_task, list_candidates, record_scan_failure, save_daily_bars, save_scan_results
 from backend.app.stealth_scanner import evaluate_candidate
+from backend.app.tracking_repository import _day_window
 
 
 def _delete_stealth_test_symbol(symbol: str) -> None:
@@ -103,8 +104,7 @@ def _test_market_bundle():
 
 def _delete_tracking_test_rows() -> None:
     today = date.today()
-    start = datetime.combine(today, datetime.min.time())
-    end = start + timedelta(days=1)
+    start, end = _day_window(today)
     with connect() as conn:
         conn.execute("DELETE FROM market_snapshots WHERE captured_at >= %s AND captured_at < %s", (start, end))
         conn.execute("DELETE FROM market_events WHERE id LIKE %s OR id LIKE %s", ("live-test-%", "rule-%"))
@@ -283,19 +283,126 @@ def _synthetic_bars(symbol: str, count: int = 130, breakout: bool = True) -> lis
     return bars
 
 
+def _volume_price_bars(symbol: str, count: int = 130, end_day: date | None = None) -> list[DailyBar]:
+    final_day = end_day or date.today()
+    start = final_day - timedelta(days=count - 1)
+    bars: list[DailyBar] = []
+    for index in range(count):
+        current = start + timedelta(days=index)
+        close = 9.8 + index * 0.01
+        open_price = close - 0.03
+        high = close + 0.08
+        low = close - 0.08
+        amount = 75_000_000 + index * 120_000
+        volume = 900_000 + index * 1500
+        change_pct = 0.45
+        turnover_rate = 4.5
+        if index >= count - 5:
+            step = index - (count - 5)
+            amount = [96_000_000, 118_000_000, 145_000_000, 178_000_000, 235_000_000][step]
+            volume = [1_050_000, 1_160_000, 1_320_000, 1_510_000, 1_760_000][step]
+            turnover_rate = [4.2, 4.8, 5.5, 6.2, 7.1][step]
+        if index == count - 1:
+            open_price = close * 0.985
+            close = close * 1.042
+            high = close * 1.006
+            low = open_price * 0.995
+            change_pct = 4.2
+        bars.append(
+            DailyBar(
+                symbol=symbol,
+                trade_date=current,
+                open=round(open_price, 3),
+                high=round(high, 3),
+                low=round(low, 3),
+                close=round(close, 3),
+                volume=volume,
+                amount=amount,
+                change_pct=change_pct,
+                turnover_rate=turnover_rate,
+            )
+        )
+    return bars
+
+
 def test_stealth_scanner_identifies_launch_confirmation():
     symbol = "600888.SH"
-    bars = _synthetic_bars(symbol)
+    bars = _volume_price_bars(symbol)
     candidate = evaluate_candidate(
         StockUniverseItem(symbol=symbol, name="测试潜伏"),
         bars,
         themes=[ThemeMembership(symbol=symbol, theme_name="机器人", theme_type="concept")],
         active_themes=["机器人"],
+        market_profile={"float_market_cap_billion": 126, "volume_ratio": 1.7},
     )
     assert candidate.stage in {"启动确认", "潜伏观察"}
     assert candidate.accumulation_score >= 65
     assert candidate.theme_score >= 70
     assert candidate.evidence
+
+
+def test_mainboard_volume_price_strategy_identifies_matching_candidate():
+    symbol = "600888.SH"
+    candidate = evaluate_candidate(
+        StockUniverseItem(symbol=symbol, name="测试主板启动", listed_days=900),
+        _volume_price_bars(symbol),
+        market_profile={"float_market_cap_billion": 126, "volume_ratio": 1.7},
+    )
+
+    assert candidate.stage in {"启动确认", "潜伏观察"}
+    assert candidate.total_score >= 65
+    assert candidate.metrics["strategy_profile"] == "mainboard_volume_price"
+    assert candidate.metrics["float_market_cap_billion"] == 126
+    assert candidate.metrics["volume_ratio"] == 1.7
+    assert candidate.metrics["mainboard_match"] == "yes"
+    assert candidate.metrics["ma_alignment"] == "bullish"
+    assert candidate.metrics["intraday_proxy"] in {"strong_close", "partial"}
+    assert any("主板量价启动" in item for item in candidate.evidence)
+
+
+def test_mainboard_volume_price_strategy_excludes_wrong_board_and_missing_market_cap():
+    wrong_board_symbol = "300888.SZ"
+    wrong_board = evaluate_candidate(
+        StockUniverseItem(symbol=wrong_board_symbol, name="测试创业板", listed_days=900),
+        _volume_price_bars(wrong_board_symbol),
+        market_profile={"float_market_cap_billion": 126, "volume_ratio": 1.7},
+    )
+    missing_cap_symbol = "600889.SH"
+    missing_cap = evaluate_candidate(
+        StockUniverseItem(symbol=missing_cap_symbol, name="测试缺市值", listed_days=900),
+        _volume_price_bars(missing_cap_symbol),
+        market_profile={"volume_ratio": 1.7},
+    )
+
+    assert wrong_board.stage == "数据不足"
+    assert wrong_board.risk_penalty >= 80
+    assert any("沪深主板" in risk for risk in wrong_board.risks)
+    assert missing_cap.stage == "数据不足"
+    assert any("流通市值" in risk for risk in missing_cap.risks)
+
+
+def test_stealth_candidates_suppress_repeated_unobserved_same_stage():
+    symbol = "600891.SH"
+    _delete_stealth_test_symbol(symbol)
+    try:
+        candidates = []
+        for days_ago in [2, 1, 0]:
+            end_day = date.today() - timedelta(days=days_ago)
+            candidate = evaluate_candidate(
+                StockUniverseItem(symbol=symbol, name="测试重复", listed_days=900),
+                _volume_price_bars(symbol, end_day=end_day),
+                market_profile={"float_market_cap_billion": 118, "volume_ratio": 1.6},
+            )
+            candidates.append(candidate)
+        save_scan_results(candidates)
+
+        suppressed = list_candidates(limit=20, suppress_repeats=True, repeat_days=3)
+        unsuppressed = list_candidates(limit=20, suppress_repeats=False, repeat_days=3)
+
+        assert all(item.symbol != symbol for item in suppressed)
+        assert any(item.symbol == symbol for item in unsuppressed)
+    finally:
+        _delete_stealth_test_symbol(symbol)
 
 
 def test_stealth_scanner_marks_insufficient_history():
@@ -308,12 +415,13 @@ def test_stealth_scanner_marks_insufficient_history():
 def test_stealth_candidate_api_and_observation_flow():
     symbol = "600890.SH"
     _delete_stealth_test_symbol(symbol)
-    bars = _synthetic_bars(symbol)
+    bars = _volume_price_bars(symbol)
     candidate = evaluate_candidate(
         StockUniverseItem(symbol=symbol, name="测试观察"),
         bars,
         themes=[ThemeMembership(symbol=symbol, theme_name="半导体", theme_type="concept")],
         active_themes=["半导体"],
+        market_profile={"float_market_cap_billion": 126, "volume_ratio": 1.7},
     )
     try:
         save_daily_bars(bars)
@@ -401,7 +509,14 @@ def test_stealth_diagnostics_returns_near_miss_without_polluting_candidates():
     _delete_stealth_test_symbol(symbol)
     candidate = evaluate_candidate(
         StockUniverseItem(symbol=symbol, name="测试诊断"),
-        _synthetic_bars(symbol, breakout=False),
+        _volume_price_bars(symbol),
+        market_profile={"float_market_cap_billion": 126, "volume_ratio": 1.7},
+    ).model_copy(
+        update={
+            "stage": "数据不足",
+            "total_score": 22,
+            "risks": ["未达到观察阈值：主板量价启动结构接近，但仍需继续观察。"],
+        }
     )
     try:
         save_scan_results([candidate])

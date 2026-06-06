@@ -163,6 +163,76 @@ export interface AgentStatusResponse {
   data_source_statuses?: DataSourceStatus[];
 }
 
+export type AgentRunStatus = "running" | "completed" | "degraded" | "failed";
+export type AgentActionStatus = "pending" | "approved" | "rejected" | "applied";
+
+export interface AgentRun {
+  id: string;
+  workflow: string;
+  status: AgentRunStatus;
+  trigger: string;
+  summary: string;
+  error: string | null;
+  calls_used: number;
+  tokens_used: number;
+  started_at: string;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentStep {
+  id: string;
+  run_id: string;
+  agent_name: string;
+  status: "completed" | "degraded" | "failed" | "skipped";
+  tool_calls: string[];
+  source_ids: string[];
+  output: Record<string, unknown>;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+  created_at: string;
+}
+
+export interface AgentArtifact {
+  id: string;
+  run_id: string;
+  artifact_type: string;
+  title: string;
+  content: Record<string, unknown>;
+  source_ids: string[];
+  created_at: string;
+}
+
+export interface AgentAction {
+  id: string;
+  run_id: string;
+  action_type: string;
+  symbol: string | null;
+  status: AgentActionStatus;
+  payload: Record<string, unknown>;
+  rationale: string;
+  source_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentRunDetail {
+  run: AgentRun;
+  steps: AgentStep[];
+  artifacts: AgentArtifact[];
+  actions: AgentAction[];
+}
+
+export interface AgentUsageSummary {
+  configured: boolean;
+  model: string;
+  daily_call_limit: number;
+  calls_used_today: number;
+  calls_remaining_today: number;
+}
+
 export interface AssistantAnswer {
   answer: string;
   citations: SourceRef[];

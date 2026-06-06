@@ -378,6 +378,86 @@ def init_schema() -> None:
             );
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_runs (
+                id TEXT PRIMARY KEY,
+                workflow TEXT NOT NULL,
+                status TEXT NOT NULL,
+                trigger TEXT NOT NULL DEFAULT 'manual',
+                summary TEXT NOT NULL DEFAULT '',
+                error TEXT,
+                calls_used INTEGER NOT NULL DEFAULT 0,
+                tokens_used INTEGER NOT NULL DEFAULT 0,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                finished_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_steps (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+                agent_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                tool_calls JSONB NOT NULL DEFAULT '[]'::jsonb,
+                source_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                output JSONB NOT NULL DEFAULT '{}'::jsonb,
+                error TEXT,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                finished_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_artifacts (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+                artifact_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content JSONB NOT NULL DEFAULT '{}'::jsonb,
+                source_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_actions (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+                action_type TEXT NOT NULL,
+                symbol TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                rationale TEXT NOT NULL DEFAULT '',
+                source_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS llm_usage (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+                agent_name TEXT NOT NULL,
+                model TEXT NOT NULL,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                latency_ms INTEGER NOT NULL DEFAULT 0,
+                success BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_market_events_occurred_at ON market_events (occurred_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_type_day ON reports (report_type, trading_day);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_assistant_queries_created_at ON assistant_queries (created_at DESC);")
@@ -393,6 +473,11 @@ def init_schema() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_market_snapshots_captured ON market_snapshots (captured_at DESC, interval);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_news_items_symbol_day ON news_items (symbol, published_at DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_announcement_items_symbol_day ON announcement_items (symbol, published_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_runs_started ON agent_runs (started_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps (run_id, created_at ASC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_artifacts_run ON agent_artifacts (run_id, created_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_actions_status ON agent_actions (status, created_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage (created_at DESC);")
 
 
 def check_postgres() -> bool:
