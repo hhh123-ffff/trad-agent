@@ -160,3 +160,27 @@ def test_post_market_replay_degrades_and_notifies_when_data_is_stale(monkeypatch
         assert notification_types == {"pipeline_degraded", "data_stale"}
     finally:
         _delete_run(run.id)
+
+
+def test_post_market_replay_uses_successful_steps_as_freshness_coverage(monkeypatch):
+    calls: list[str] = []
+    _install_successful_steps(monkeypatch, calls)
+    captured_inputs: list[DataFreshnessInputs] = []
+    monkeypatch.setattr(tracking_service, "collect_news_and_announcements", lambda: calls.append("collect_information") or ([], []))
+
+    def capture_freshness(_, inputs):
+        captured_inputs.append(inputs)
+        return _fresh_result()
+
+    monkeypatch.setattr(tracking_service, "evaluate_data_freshness", capture_freshness)
+
+    run = tracking_service.run_tracking_job("post_market_replay")
+    try:
+        assert captured_inputs
+        inputs = captured_inputs[0]
+        assert inputs.snapshot_date == TRADING_DAY
+        assert inputs.announcement_coverage_date == TRADING_DAY
+        assert inputs.report_date == TRADING_DAY
+        assert inputs.agent_report_date == TRADING_DAY
+    finally:
+        _delete_run(run.id)

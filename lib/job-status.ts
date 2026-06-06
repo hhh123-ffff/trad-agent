@@ -65,7 +65,7 @@ export function postMarketPipeline(run: JobRun | null): JobPipelineStep[] {
     {
       key: "close_snapshot",
       label: "收盘快照",
-      status: statusValue(snapshot.status),
+      status: inferredScopeStatus(snapshot),
       detail: textValue(snapshot.error) || `Events: ${snapshotEvents}`,
       attempts: 0,
       durationMs: 0,
@@ -75,7 +75,7 @@ export function postMarketPipeline(run: JobRun | null): JobPipelineStep[] {
     {
       key: "collect_information",
       label: "公告与新闻",
-      status: statusValue(information.status),
+      status: inferredScopeStatus(information),
       detail: textValue(information.error) || `News: ${news} / Announcements: ${announcements}`,
       attempts: 0,
       durationMs: 0,
@@ -85,7 +85,7 @@ export function postMarketPipeline(run: JobRun | null): JobPipelineStep[] {
     {
       key: "stealth_scan",
       label: "策略扫描",
-      status: statusValue(scan.status),
+      status: inferredScopeStatus(scan),
       detail: textValue(scan.error) || textValue(scan.reason) || `Scanned: ${scanned} / Saved: ${saved}`,
       attempts: 0,
       durationMs: 0,
@@ -95,7 +95,7 @@ export function postMarketPipeline(run: JobRun | null): JobPipelineStep[] {
     {
       key: "observation_journal",
       label: "观察池日志",
-      status: Object.keys(journal).length > 0 || typeof scope.observation_journal === "number" ? "completed" : "pending",
+      status: inferredScopeStatus(journal, typeof scope.observation_journal === "number"),
       detail: `Records: ${numberValue(journal.observation_journal) || journalCount}`,
       attempts: 0,
       durationMs: 0,
@@ -105,7 +105,7 @@ export function postMarketPipeline(run: JobRun | null): JobPipelineStep[] {
     {
       key: "daily_report",
       label: "确定性日报",
-      status: Object.keys(report).length > 0 || typeof scope.report_sections === "number" ? "completed" : "pending",
+      status: inferredScopeStatus(report, typeof scope.report_sections === "number"),
       detail: `Sections: ${numberValue(report.sections) || reportSections}`,
       attempts: 0,
       durationMs: 0,
@@ -169,4 +169,13 @@ function stepDetail(step: JobRunStep): string {
     .slice(0, 3)
     .map(([key, value]) => `${key}: ${value}`);
   return entries.join(" · ") || "步骤已记录";
+}
+
+function inferredScopeStatus(scope: Record<string, unknown>, legacyCompleted = false): PipelineStatus {
+  const explicit = statusValue(scope.status);
+  if (explicit !== "pending") return explicit;
+  if (typeof scope.action === "string") return "failed";
+  if (typeof scope.reason === "string") return "skipped";
+  if (legacyCompleted || Object.keys(scope).length > 0) return "completed";
+  return "pending";
 }

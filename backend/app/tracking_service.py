@@ -751,7 +751,21 @@ def _durable_post_market_replay_job(job_run_id: str) -> tuple[dict[str, object],
     ]
     latest_steps = [run_pipeline_step(job_run_id, name, handler) for name, handler in step_handlers]
     status = aggregate_pipeline_status(latest_steps)
-    freshness = evaluate_data_freshness(state["trading_day"], load_data_freshness_inputs())
+    freshness_inputs = load_data_freshness_inputs()
+    latest_by_name = {step.step_name: step for step in latest_steps}
+    freshness_updates: dict[str, object] = {}
+    if latest_by_name["close_snapshot"].status == "completed":
+        freshness_updates["snapshot_date"] = state["trading_day"]
+    if latest_by_name["collect_information"].status == "completed":
+        freshness_updates["announcement_coverage_date"] = state["trading_day"]
+    if latest_by_name["daily_report"].status == "completed":
+        freshness_updates["report_date"] = state["trading_day"]
+    if latest_by_name["agent_post_market"].status in {"completed", "degraded"}:
+        freshness_updates["agent_report_date"] = state["trading_day"]
+    freshness = evaluate_data_freshness(
+        state["trading_day"],
+        freshness_inputs.model_copy(update=freshness_updates),
+    )
     if freshness.status != "fresh" and status == "completed":
         status = "degraded"
     scope: dict[str, object] = {

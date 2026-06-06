@@ -553,4 +553,3 @@ git commit -m "docs: complete daily operations workflow"
 ### Step 8: Final review and push
 
 Use `superpowers:requesting-code-review`, address actionable findings, rerun all verification, then push `codex/volume-price-strategy-ui`.
-
