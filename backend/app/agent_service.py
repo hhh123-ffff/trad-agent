@@ -197,7 +197,6 @@ class PostMarketAgentService:
                     tokens_used,
                 )
 
-            self._apply_observation_actions(run.id, context, outputs["ObservationManagerAgent"], source_ids)
             self._save_step(
                 run.id,
                 "ComplianceGuard",
@@ -217,7 +216,7 @@ class PostMarketAgentService:
                     created_at=_now(),
                 )
             )
-            return self.repository.finish_run(
+            finished = self.repository.finish_run(
                 run.id,
                 "completed",
                 str(brief.get("summary") or "Post-market Agent workflow completed."),
@@ -225,6 +224,18 @@ class PostMarketAgentService:
                 calls_used,
                 tokens_used,
             )
+            try:
+                self._apply_observation_actions(run.id, context, outputs["ObservationManagerAgent"], source_ids)
+            except Exception as exc:
+                self._save_step(
+                    run.id,
+                    "ObservationActionWriter",
+                    "failed",
+                    output={},
+                    source_ids=source_ids,
+                    error=f"Post-completion observation action failed: {exc}",
+                )
+            return finished
         except Exception as exc:
             return self._degrade(run.id, context, f"Agent workflow failed: {exc}", calls_used, tokens_used)
 

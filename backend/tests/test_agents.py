@@ -5,9 +5,12 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from backend.app import agent_runtime as agent_runtime_module
 from backend.app.agent_service import LLMCompletion, PostMarketAgentService
 from backend.app.agent_context import build_post_market_agent_context
 from backend.app.agent_repository import PostgresAgentRepository, apply_agent_action
+from backend.app.agent_status import build_agent_statuses
+from backend.app.compliance import check_text
 from backend.app.llm_client import OpenAICompatibleClient
 from backend.app import main as main_module
 from backend.app.database import connect
@@ -263,6 +266,119 @@ def test_compliance_guard_blocks_observation_actions_before_they_are_applied():
     assert run.status == "degraded"
     assert observed == []
     assert repository.actions == []
+
+
+def test_compliance_guard_blocks_english_investment_advice():
+    result = check_text("Buy 600000.SH and use a 50% position with target price 15.")
+
+    assert result.allowed is False
+    assert {"buy_sell", "target_price", "position"} <= set(result.blocked_terms)
+
+
+def test_research_agent_rejects_non_compliant_structured_fields():
+    llm = FakeLLM(
+        {
+            "ResearchQueryAgent": {
+                "answer": "Only verified facts are summarized.",
+                "evidence": ["Buy 600000.SH now."],
+                "source_ids": ["src-test"],
+                "missing_information": ["Target price is 15."],
+                "confidence": "high",
+            }
+        }
+    )
+
+    answer, completion = create_research_answer("Explain the candidate facts.", _context(), llm)
+
+    assert answer is None
+    assert completion is not None
+
+
+def test_workflow_does_not_write_observation_when_artifact_persistence_fails():
+    repository = MemoryRepository()
+    original_save_artifact = repository.save_artifact
+
+    def fail_post_market_brief(artifact: AgentArtifact) -> AgentArtifact:
+        if artifact.artifact_type == "post_market_brief":
+            raise RuntimeError("artifact write failed")
+        return original_save_artifact(artifact)
+
+    repository.save_artifact = fail_post_market_brief  # type: ignore[method-assign]
+    observed: list[dict[str, str]] = []
+    service = PostMarketAgentService(
+        repository,
+        FakeLLM(_valid_responses()),
+        _context,
+        observation_writer=lambda **payload: observed.append(payload),
+    )
+
+    run = service.run(trigger="test")
+
+    assert run.status == "degraded"
+    assert observed == []
+
+
+def test_research_query_context_failure_finishes_run_as_degraded(monkeypatch):
+    repository = MemoryRepository()
+
+    class ConfiguredClient:
+        configured = True
+        model = "fake-model"
+
+    monkeypatch.setattr(agent_runtime_module, "PostgresAgentRepository", lambda: repository)
+    monkeypatch.setattr(agent_runtime_module, "OpenAICompatibleClient", lambda: ConfiguredClient())
+    monkeypatch.setattr(agent_runtime_module, "build_post_market_agent_context", lambda: (_ for _ in ()).throw(RuntimeError("context failed")))
+
+    result = agent_runtime_module.run_research_query_agent("Explain the facts.")
+
+    assert result is None
+    assert repository.runs[-1].status == "degraded"
+    assert "context failed" in (repository.runs[-1].error or "")
+
+
+def test_agent_statuses_reflect_unconfigured_model_and_latest_run():
+    now = datetime.now(timezone.utc)
+    latest_run = AgentRun(
+        id="run-status",
+        workflow="post_market",
+        status="degraded",
+        trigger="scheduled_job",
+        summary="Deterministic fallback saved.",
+        error="LLM is not configured.",
+        started_at=now,
+        finished_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+
+    statuses = build_agent_statuses(True, True, latest_run=latest_run, llm_configured=False)
+    by_name = {status.name: status for status in statuses}
+
+    assert by_name["PostMarket Coordinator"].status == "degraded"
+    assert by_name["Candidate Research Agent"].status == "degraded"
+    assert by_name["Candidate Research Agent"].last_run_at == now
+    assert "not configured" in by_name["Candidate Research Agent"].latest_message.lower()
+
+
+def test_agent_status_endpoint_reads_latest_post_market_run(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    class ConfiguredClient:
+        configured = True
+
+    def fake_list_runs(*, limit: int, workflow: str | None = None):
+        captured["limit"] = limit
+        captured["workflow"] = workflow
+        return []
+
+    monkeypatch.setattr(main_module, "check_postgres", lambda: True)
+    monkeypatch.setattr(main_module, "check_redis", lambda: True)
+    monkeypatch.setattr(main_module, "list_agent_runs", fake_list_runs)
+    monkeypatch.setattr(main_module, "OpenAICompatibleClient", lambda: ConfiguredClient())
+
+    main_module.agent_status()
+
+    assert captured == {"limit": 1, "workflow": "post_market"}
 
 
 def test_openai_compatible_client_parses_fenced_json(monkeypatch):

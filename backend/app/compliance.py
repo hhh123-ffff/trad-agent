@@ -5,11 +5,11 @@ import re
 from .models import ComplianceCheck
 
 BLOCKED_PATTERNS = {
-    "buy_sell": r"(买入|卖出|持有|加仓|减仓|清仓|满仓|梭哈|可以买|能不能买|该不该买|能买吗)",
-    "target_price": r"(目标价|看到\s*\d+|涨到\s*\d+|跌到\s*\d+)",
-    "guarantee": r"(必涨|必跌|稳赚|保证收益|无风险|翻倍)",
-    "recommendation": r"(推荐.*股票|荐股|牛股|明牌|抄底|逃顶)",
-    "position": r"(仓位|几成仓|多少仓|重仓|轻仓)",
+    "buy_sell": r"(买入|卖出|持有|加仓|减仓|清仓|满仓|梭哈|可以买|能不能买|该不该买|能买吗|\b(?:buy|sell|hold|add\s+to|reduce|exit)\b)",
+    "target_price": r"(目标价|看到\s*\d+|涨到\s*\d+|跌到\s*\d+|\b(?:target[-\s]?price|price\s+target)\b)",
+    "guarantee": r"(必涨|必跌|稳赚|保证收益|无风险|翻倍|\b(?:guaranteed?\s+returns?|risk[-\s]?free|double\s+your)\b)",
+    "recommendation": r"(推荐.*股票|荐股|牛股|明牌|抄底|逃顶|\b(?:recommend(?:ed|ation)?|stock\s+pick)\b)",
+    "position": r"(仓位|几成仓|多少仓|重仓|轻仓|\b(?:position|allocation)\b)",
 }
 
 

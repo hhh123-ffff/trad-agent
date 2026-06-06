@@ -168,9 +168,15 @@ class PostgresAgentRepository:
         return int(row["count"] or 0) if row else 0
 
 
-def list_agent_runs(limit: int = 30) -> list[AgentRun]:
+def list_agent_runs(limit: int = 30, workflow: str | None = None) -> list[AgentRun]:
     with connect() as conn:
-        rows = conn.execute("SELECT * FROM agent_runs ORDER BY started_at DESC LIMIT %s", (limit,)).fetchall()
+        if workflow:
+            rows = conn.execute(
+                "SELECT * FROM agent_runs WHERE workflow = %s ORDER BY started_at DESC LIMIT %s",
+                (workflow, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM agent_runs ORDER BY started_at DESC LIMIT %s", (limit,)).fetchall()
     return [_run(row) for row in rows]
 
 

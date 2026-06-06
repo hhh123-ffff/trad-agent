@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -579,17 +579,23 @@ def _suppress_repeated_candidates(
     symbols = [candidate.symbol for candidate in candidates if not candidate.observed]
     if not symbols:
         return candidates
-    start_day = trading_day - timedelta(days=repeat_days - 1)
     with connect() as conn:
         rows = conn.execute(
             """
+            WITH recent_days AS (
+                SELECT DISTINCT trading_day
+                FROM stealth_scan_results
+                WHERE trading_day <= %s
+                ORDER BY trading_day DESC
+                LIMIT %s
+            )
             SELECT r.symbol, r.stage, r.trading_day, o.symbol IS NOT NULL AS observed
             FROM stealth_scan_results r
             LEFT JOIN observation_list o ON o.user_id = %s AND o.symbol = r.symbol
-            WHERE r.symbol = ANY(%s) AND r.trading_day >= %s AND r.trading_day <= %s
+            WHERE r.symbol = ANY(%s) AND r.trading_day IN (SELECT trading_day FROM recent_days)
             ORDER BY r.symbol, r.trading_day ASC
             """,
-            (user_id, symbols, start_day, trading_day),
+            (trading_day, repeat_days, user_id, symbols),
         ).fetchall()
     history: dict[str, list[dict[str, Any]]] = {}
     for row in rows:

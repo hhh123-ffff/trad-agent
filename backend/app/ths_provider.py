@@ -361,9 +361,14 @@ def _stock_item_from_row(row: dict[str, Any]) -> StockUniverseItem | None:
         symbol=_ths_symbol(str(raw_symbol)),
         name=name,
         is_st=("ST" in name.upper()) or ("退" in name),
-        listed_days=0,
+        listed_days=_listed_days(_pick(row, "上市日期", "A股上市日期", "listingDate", "listDate", "ipoDate")),
         market="A股",
     )
+
+
+def _listed_days(value: Any) -> int:
+    listing_date = _parse_date(value)
+    return max((date.today() - listing_date).days, 0) if listing_date else 0
 
 
 def _announcement_from_row(row: dict[str, Any], fallback_date: date) -> AnnouncementItem | None:

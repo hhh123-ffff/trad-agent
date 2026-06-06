@@ -441,6 +441,9 @@ export function MarketLensDashboard() {
     try {
       const result = await askAssistant(query);
       setAnswer(result);
+      setState((current) => ({ ...current, error: undefined }));
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : "研究问答请求失败" }));
     } finally {
       setAsking(false);
     }
@@ -2494,7 +2497,7 @@ function JobRunsPanel({ jobRuns, onRunJob }: { jobRuns: JobRun[]; onRunJob: (job
           <div key={run.id} className="rounded-md border border-ink/10 bg-white px-3 py-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm font-semibold">{run.job_name}</span>
-              <span className={`rounded-md border px-2 py-1 text-xs ${run.status === "failed" ? "border-danger/20 bg-danger/10 text-danger" : "border-pine/20 bg-pine/10 text-pine"}`}>
+              <span className={`rounded-md border px-2 py-1 text-xs ${jobStatusClass(run.status)}`}>
                 {run.status}
               </span>
             </div>
@@ -2506,6 +2509,12 @@ function JobRunsPanel({ jobRuns, onRunJob }: { jobRuns: JobRun[]; onRunJob: (job
       </div>
     </section>
   );
+}
+
+function jobStatusClass(status: string) {
+  if (status === "completed") return "border-pine/20 bg-pine/10 text-pine";
+  if (status === "failed") return "border-danger/20 bg-danger/10 text-danger";
+  return "border-signal/20 bg-signal/10 text-signal";
 }
 
 function AgentPanel({ agents }: { agents: AgentStatusResponse }) {
@@ -2520,7 +2529,7 @@ function AgentPanel({ agents }: { agents: AgentStatusResponse }) {
                 <h3 className="text-sm font-semibold">{agent.name}</h3>
                 <p className="mt-1 text-xs leading-5 text-muted">{agent.purpose}</p>
               </div>
-              <span className="rounded-md border border-pine/20 bg-pine/10 px-2 py-1 text-xs text-pine">{agent.status}</span>
+              <span className={`rounded-md border px-2 py-1 text-xs ${agentHealthClass(agent.status)}`}>{agent.status}</span>
             </div>
             <p className="mt-3 text-xs text-muted">{agent.latest_message}</p>
           </article>
@@ -2528,6 +2537,12 @@ function AgentPanel({ agents }: { agents: AgentStatusResponse }) {
       </div>
     </section>
   );
+}
+
+function agentHealthClass(status: AgentStatusResponse["agents"][number]["status"]) {
+  if (status === "healthy") return "border-pine/20 bg-pine/10 text-pine";
+  if (status === "degraded") return "border-danger/20 bg-danger/10 text-danger";
+  return "border-saffron/30 bg-saffron/10 text-saffron";
 }
 
 function SourcePanel({ sources }: { sources: SourceRef[] }) {

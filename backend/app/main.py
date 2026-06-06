@@ -24,6 +24,7 @@ from .data_providers import (
 )
 from .database import check_postgres, check_redis
 from .history_provider import HistoryDataUnavailable
+from .llm_client import OpenAICompatibleClient
 from .market_provider import (
     DISCLAIMER,
     build_live_preopen,
@@ -631,7 +632,15 @@ def compliance_check(payload: dict[str, str]) -> ComplianceCheck:
 
 @app.get("/api/admin/agents", response_model=AgentStatusResponse)
 def agent_status() -> AgentStatusResponse:
-    agents = build_agent_statuses(check_postgres(), check_redis())
+    postgres_ok = check_postgres()
+    redis_ok = check_redis()
+    latest_runs = list_agent_runs(limit=1, workflow="post_market") if postgres_ok else []
+    agents = build_agent_statuses(
+        postgres_ok,
+        redis_ok,
+        latest_run=latest_runs[0] if latest_runs else None,
+        llm_configured=OpenAICompatibleClient().configured,
+    )
     failures = sum(agent.failure_count_24h for agent in agents)
     return AgentStatusResponse(
         agents=agents,
@@ -648,7 +657,15 @@ def assistant_query_history(limit: int = 50) -> dict[str, object]:
 
 @app.post("/api/admin/jobs/{job_name}/rerun")
 def rerun_job(job_name: str) -> dict[str, str]:
-    agents = build_agent_statuses(check_postgres(), check_redis())
+    postgres_ok = check_postgres()
+    redis_ok = check_redis()
+    latest_runs = list_agent_runs(limit=1, workflow="post_market") if postgres_ok else []
+    agents = build_agent_statuses(
+        postgres_ok,
+        redis_ok,
+        latest_run=latest_runs[0] if latest_runs else None,
+        llm_configured=OpenAICompatibleClient().configured,
+    )
     known = {agent.name.lower().replace(" ", "-"): agent.name for agent in agents}
     if job_name not in known:
         raise HTTPException(status_code=404, detail="Unknown agent job.")

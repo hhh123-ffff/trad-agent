@@ -3,24 +3,47 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from .market_provider import CN_TZ
-from .models import AgentStatus
+from .models import AgentRun, AgentStatus
 
 
-def build_agent_statuses(postgres_ok: bool, redis_ok: bool) -> list[AgentStatus]:
+def build_agent_statuses(
+    postgres_ok: bool,
+    redis_ok: bool,
+    *,
+    latest_run: AgentRun | None = None,
+    llm_configured: bool = False,
+) -> list[AgentStatus]:
     now = datetime.now(CN_TZ)
     infra_ok = postgres_ok and redis_ok
     data_status = "healthy" if infra_ok else "degraded"
     data_message = "PostgreSQL 与 Redis 可用，真实行情请求由接口实时执行。" if infra_ok else "本地数据库或 Redis 未完全可用。"
+    last_run_at = latest_run.started_at if latest_run else now
+    if not infra_ok:
+        model_status = "degraded"
+        model_message = "本地数据库或 Redis 未完全可用，Agent 工作流状态不可确认。"
+    elif not llm_configured:
+        model_status = "degraded"
+        model_message = "LLM is not configured; deterministic replay remains available."
+    elif latest_run is None:
+        model_status = "paused"
+        model_message = "Agent 尚未运行。"
+    elif latest_run.status == "completed":
+        model_status = "healthy"
+        model_message = latest_run.summary or "最近一次 Agent 工作流已完成。"
+    else:
+        model_status = "degraded"
+        model_message = latest_run.error or latest_run.summary or f"最近一次 Agent 运行状态为 {latest_run.status}。"
+    model_failures = 1 if model_status == "degraded" else 0
 
     return [
         AgentStatus(
             name="PostMarket Coordinator",
             purpose="按固定步骤编排盘后数据、研究、观察与合规流程。",
-            status=data_status,
-            last_run_at=now,
+            status=model_status if infra_ok else data_status,
+            last_run_at=last_run_at,
             next_run_at=now + timedelta(days=1),
-            latest_message=data_message,
-            failure_count_24h=0 if infra_ok else 1,
+            latest_message=model_message if infra_ok else data_message,
+            failure_count_24h=model_failures if infra_ok else 1,
         ),
         AgentStatus(
             name="Data Quality Agent",
@@ -34,46 +57,46 @@ def build_agent_statuses(postgres_ok: bool, redis_ok: bool) -> list[AgentStatus]
         AgentStatus(
             name="Announcement Analyst Agent",
             purpose="只读取结构化公告与新闻摘要，整理重要性、关联标的和数据缺口。",
-            status="healthy",
-            last_run_at=now,
+            status=model_status,
+            last_run_at=last_run_at,
             next_run_at=now + timedelta(days=1),
-            latest_message="公告正文不会直接发送给模型。",
-            failure_count_24h=0,
+            latest_message=model_message,
+            failure_count_24h=model_failures,
         ),
         AgentStatus(
             name="Candidate Research Agent",
             purpose="基于确定性筛选结果解释规则命中、证据和风险缺口。",
-            status="healthy",
-            last_run_at=now,
+            status=model_status,
+            last_run_at=last_run_at,
             next_run_at=now + timedelta(days=1),
-            latest_message="Agent 不修改策略阈值，也不输出买卖建议。",
-            failure_count_24h=0,
+            latest_message=model_message,
+            failure_count_24h=model_failures,
         ),
         AgentStatus(
             name="Observation Manager Agent",
             purpose="受控更新当前候选观察项，删除动作进入人工审批。",
-            status="healthy",
-            last_run_at=now,
+            status=model_status,
+            last_run_at=last_run_at,
             next_run_at=now + timedelta(days=1),
-            latest_message="自动写入仅限当前确定性候选。",
-            failure_count_24h=0,
+            latest_message=model_message,
+            failure_count_24h=model_failures,
         ),
         AgentStatus(
             name="Report Editor Agent",
             purpose="把确定性日报与各 Agent 结构化输出整理为盘后研究简报。",
-            status="healthy",
-            last_run_at=now,
+            status=model_status,
+            last_run_at=last_run_at,
             next_run_at=now + timedelta(days=1),
-            latest_message="模型失败时保留确定性日报作为回退。",
-            failure_count_24h=0,
+            latest_message=model_message,
+            failure_count_24h=model_failures,
         ),
         AgentStatus(
             name="Compliance Guard",
             purpose="拦截买卖建议、目标价、仓位建议和收益承诺。",
-            status="healthy",
-            last_run_at=now,
+            status=model_status,
+            last_run_at=last_run_at,
             next_run_at=None,
-            latest_message="合规拦截保持实时启用。",
-            failure_count_24h=0,
+            latest_message=model_message,
+            failure_count_24h=model_failures,
         ),
     ]

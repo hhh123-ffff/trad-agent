@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .agent_service import LLMClient, LLMCompletion
@@ -31,7 +32,7 @@ def create_research_answer(
     )
     output = completion.data
     answer_text = str(output.get("answer") or "").strip()
-    if not answer_text or not check_text(answer_text).allowed:
+    if not answer_text or not check_text(json.dumps(output, ensure_ascii=False)).allowed:
         return None, completion
     evidence = _strings(output.get("evidence"))[:12]
     allowed_source_ids = _strings(context.get("source_ids"))

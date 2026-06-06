@@ -329,7 +329,7 @@ def test_stealth_scanner_identifies_launch_confirmation():
     symbol = "600888.SH"
     bars = _volume_price_bars(symbol)
     candidate = evaluate_candidate(
-        StockUniverseItem(symbol=symbol, name="测试潜伏"),
+        StockUniverseItem(symbol=symbol, name="测试潜伏", listed_days=900),
         bars,
         themes=[ThemeMembership(symbol=symbol, theme_name="机器人", theme_type="concept")],
         active_themes=["机器人"],
@@ -381,6 +381,55 @@ def test_mainboard_volume_price_strategy_excludes_wrong_board_and_missing_market
     assert any("流通市值" in risk for risk in missing_cap.risks)
 
 
+def test_mainboard_volume_price_strategy_rejects_unknown_listing_age():
+    symbol = "600890.SH"
+
+    candidate = evaluate_candidate(
+        StockUniverseItem(symbol=symbol, name="测试上市时间未知", listed_days=0),
+        _volume_price_bars(symbol, count=120),
+        market_profile={"float_market_cap_billion": 126, "volume_ratio": 1.7},
+    )
+
+    assert candidate.stage == "数据不足"
+    assert any("上市时间" in risk for risk in candidate.risks)
+
+
+def test_mainboard_volume_price_strategy_infers_listing_age_from_long_history():
+    symbol = "600894.SH"
+
+    candidate = evaluate_candidate(
+        StockUniverseItem(symbol=symbol, name="测试历史跨度证明", listed_days=0),
+        _volume_price_bars(symbol, count=180),
+        market_profile={"float_market_cap_billion": 126, "volume_ratio": 1.7},
+    )
+
+    assert candidate.stage in {"启动确认", "潜伏观察"}
+    assert candidate.metrics["listing_age_source"] == "history_span"
+    assert candidate.metrics["listed_days"] >= 120
+
+
+def test_mainboard_volume_price_strategy_requires_step_up_volume():
+    symbol = "600892.SH"
+    bars = _volume_price_bars(symbol)
+    amounts = [160_000_000, 160_000_000, 160_000_000, 160_000_000, 210_000_000]
+    volumes = [1_400_000, 1_400_000, 1_400_000, 1_400_000, 1_700_000]
+    bars = [
+        bar.model_copy(update={"amount": amounts[index - (len(bars) - 5)], "volume": volumes[index - (len(bars) - 5)]})
+        if index >= len(bars) - 5
+        else bar
+        for index, bar in enumerate(bars)
+    ]
+
+    candidate = evaluate_candidate(
+        StockUniverseItem(symbol=symbol, name="测试量能未台阶", listed_days=900),
+        bars,
+        market_profile={"float_market_cap_billion": 126, "volume_ratio": 1.7},
+    )
+
+    assert candidate.stage == "数据不足"
+    assert any("台阶" in risk for risk in candidate.risks)
+
+
 def test_stealth_candidates_suppress_repeated_unobserved_same_stage():
     symbol = "600891.SH"
     _delete_stealth_test_symbol(symbol)
@@ -405,6 +454,29 @@ def test_stealth_candidates_suppress_repeated_unobserved_same_stage():
         _delete_stealth_test_symbol(symbol)
 
 
+def test_stealth_candidates_suppress_repeated_across_weekend():
+    symbol = "600893.SH"
+    friday = date(2026, 6, 5)
+    monday = date(2026, 6, 8)
+    _delete_stealth_test_symbol(symbol)
+    try:
+        candidates = []
+        for trading_day in [date(2026, 6, 4), friday, monday]:
+            candidate = evaluate_candidate(
+                StockUniverseItem(symbol=symbol, name="测试跨周末重复", listed_days=900),
+                _volume_price_bars(symbol, end_day=trading_day),
+                market_profile={"float_market_cap_billion": 118, "volume_ratio": 1.6},
+            )
+            candidates.append(candidate)
+        save_scan_results(candidates)
+
+        suppressed = list_candidates(trading_day=monday, limit=20, suppress_repeats=True, repeat_days=3)
+
+        assert all(item.symbol != symbol for item in suppressed)
+    finally:
+        _delete_stealth_test_symbol(symbol)
+
+
 def test_stealth_scanner_marks_insufficient_history():
     symbol = "600889.SH"
     candidate = evaluate_candidate(StockUniverseItem(symbol=symbol, name="测试不足"), _synthetic_bars(symbol, count=30))
@@ -417,7 +489,7 @@ def test_stealth_candidate_api_and_observation_flow():
     _delete_stealth_test_symbol(symbol)
     bars = _volume_price_bars(symbol)
     candidate = evaluate_candidate(
-        StockUniverseItem(symbol=symbol, name="测试观察"),
+        StockUniverseItem(symbol=symbol, name="测试观察", listed_days=900),
         bars,
         themes=[ThemeMembership(symbol=symbol, theme_name="半导体", theme_type="concept")],
         active_themes=["半导体"],
@@ -508,7 +580,7 @@ def test_stealth_diagnostics_returns_near_miss_without_polluting_candidates():
     symbol = "600890.SH"
     _delete_stealth_test_symbol(symbol)
     candidate = evaluate_candidate(
-        StockUniverseItem(symbol=symbol, name="测试诊断"),
+        StockUniverseItem(symbol=symbol, name="测试诊断", listed_days=900),
         _volume_price_bars(symbol),
         market_profile={"float_market_cap_billion": 126, "volume_ratio": 1.7},
     ).model_copy(

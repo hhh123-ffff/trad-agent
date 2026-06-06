@@ -61,7 +61,7 @@ export function AgentConsole({
       <div className="grid grid-cols-2 border-b border-ink/10 bg-[#f8fafb] sm:grid-cols-4">
         <ConsoleMetric label="模型连接" value={usage?.configured ? usage.model || "已配置" : "未配置"} tone={usage?.configured ? "good" : "warning"} />
         <ConsoleMetric label="今日调用" value={usage ? `${usage.calls_used_today}/${usage.daily_call_limit}` : "--"} />
-        <ConsoleMetric label="最新运行" value={latest?.status ?? "暂无"} tone={latest?.status === "completed" ? "good" : latest ? "warning" : undefined} />
+        <ConsoleMetric label="最新运行" value={latest?.status ?? "暂无"} tone={runTone(latest?.status)} />
         <ConsoleMetric label="待审批" value={String(actions.length)} tone={actions.length ? "warning" : "good"} />
       </div>
 
@@ -154,14 +154,21 @@ export function AgentConsole({
   );
 }
 
-function ConsoleMetric({ label, value, tone }: { label: string; value: string; tone?: "good" | "warning" }) {
-  const color = tone === "good" ? "text-pine" : tone === "warning" ? "text-saffron" : "text-ink";
+function ConsoleMetric({ label, value, tone }: { label: string; value: string; tone?: "good" | "warning" | "danger" }) {
+  const color = tone === "good" ? "text-pine" : tone === "danger" ? "text-danger" : tone === "warning" ? "text-saffron" : "text-ink";
   return (
     <div className="border-b border-r border-ink/10 px-4 py-3 last:border-r-0 sm:border-b-0">
       <p className="text-[11px] text-muted">{label}</p>
       <p className={`mt-1 truncate text-sm font-semibold ${color}`} title={value}>{value}</p>
     </div>
   );
+}
+
+function runTone(status?: string): "good" | "warning" | "danger" | undefined {
+  if (status === "completed") return "good";
+  if (status === "failed") return "danger";
+  if (status) return "warning";
+  return undefined;
 }
 
 function stepSummary(output: Record<string, unknown>) {

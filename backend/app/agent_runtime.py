@@ -43,10 +43,13 @@ def run_research_query_agent(query: str) -> AssistantAnswer | None:
     if not client.configured or repository.daily_calls_used() >= daily_limit:
         return None
     run = repository.create_run("research_query", "assistant_query")
-    context = build_post_market_agent_context()
-    source_ids = context.get("source_ids", [])
     started = datetime.now(timezone.utc)
+    source_ids: list[str] = []
+    model_called = False
     try:
+        context = build_post_market_agent_context()
+        source_ids = context.get("source_ids", [])
+        model_called = True
         answer, completion = create_research_answer(query, context, client)
         if completion is None:
             repository.finish_run(run.id, "degraded", "Research Agent unavailable.", "LLM is not configured.", 0, 0)
@@ -110,17 +113,25 @@ def run_research_query_agent(query: str) -> AssistantAnswer | None:
         repository.finish_run(run.id, "completed", "Read-only research answer generated.", None, 1, tokens)
         return answer
     except Exception as exc:
-        repository.save_usage(
-            LLMUsage(
-                id=f"usage-{uuid4().hex}",
-                run_id=run.id,
-                agent_name="ResearchQueryAgent",
-                model=client.model or "unknown",
-                success=False,
-                created_at=datetime.now(timezone.utc),
+        if model_called:
+            repository.save_usage(
+                LLMUsage(
+                    id=f"usage-{uuid4().hex}",
+                    run_id=run.id,
+                    agent_name="ResearchQueryAgent",
+                    model=client.model or "unknown",
+                    success=False,
+                    created_at=datetime.now(timezone.utc),
+                )
             )
+        repository.finish_run(
+            run.id,
+            "degraded",
+            "Research Agent failed; deterministic answer used.",
+            str(exc),
+            1 if model_called else 0,
+            0,
         )
-        repository.finish_run(run.id, "degraded", "Research Agent failed; deterministic answer used.", str(exc), 1, 0)
         return None
 
 

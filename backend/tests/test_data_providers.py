@@ -10,7 +10,7 @@ from backend.app.data_providers import (
 )
 from backend.app.history_provider import HistoryDataUnavailable
 from backend.app.models import DailyBar
-from backend.app.ths_provider import TonghuashunQuantApiClient
+from backend.app.ths_provider import TonghuashunQuantApiClient, _stock_item_from_row
 
 
 class _FakeResponse:
@@ -227,6 +227,19 @@ def test_tonghuashun_quantapi_client_maps_realtime_quotes(monkeypatch):
 
     assert quotes["600000.SH"]["latest"] == 10.8
     assert quotes["600000.SH"]["changeRatio"] == 2.5
+
+
+def test_tonghuashun_stock_universe_maps_listing_date():
+    item = _stock_item_from_row(
+        {
+            "thscode": "600000.SH",
+            "secName": "浦发银行",
+            "上市日期": "1999-11-10",
+        }
+    )
+
+    assert item is not None
+    assert item.listed_days > 120
 
 
 def test_tonghuashun_quantapi_client_maps_announcements(monkeypatch):

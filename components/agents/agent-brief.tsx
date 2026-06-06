@@ -6,7 +6,6 @@ export function AgentBrief({ detail }: { detail?: AgentRunDetail }) {
   const artifact = detail?.artifacts[0];
   const summary = textValue(artifact?.content.summary) || detail?.run.summary || "";
   const warnings = stringList(artifact?.content.warnings);
-  const isDegraded = detail?.run.status === "degraded";
 
   return (
     <section className="panel overflow-hidden rounded-lg">
@@ -20,7 +19,7 @@ export function AgentBrief({ detail }: { detail?: AgentRunDetail }) {
             <h3 className="text-base font-semibold">{artifact?.title || "盘后研究简报"}</h3>
           </div>
         </div>
-        <span className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${isDegraded ? "border-saffron/30 bg-saffron/10 text-saffron" : "border-pine/20 bg-pine/10 text-pine"}`}>
+        <span className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${runStatusClass(detail?.run.status)}`}>
           {detail?.run.status || "尚未运行"}
         </span>
       </header>
@@ -69,4 +68,11 @@ function textValue(value: unknown) {
 
 function stringList(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function runStatusClass(status?: string) {
+  if (status === "completed") return "border-pine/20 bg-pine/10 text-pine";
+  if (status === "failed") return "border-danger/20 bg-danger/10 text-danger";
+  if (status === "running") return "border-signal/20 bg-signal/10 text-signal";
+  return "border-saffron/30 bg-saffron/10 text-saffron";
 }

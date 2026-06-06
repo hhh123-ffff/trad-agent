@@ -86,8 +86,18 @@ def evaluate_candidate(
         risks.append("仅筛选沪深主板标的，科创板、创业板、北交所不进入主候选。")
         return _candidate(item, trading_day, "数据不足", 0, 0, 0, 0, 100, evidence, risks, metrics, theme_names, source_ids)
 
-    if item.listed_days and item.listed_days < 120:
-        risks.append(f"上市时间约 {item.listed_days} 天，未满 120 天，暂不纳入主板量价启动池。")
+    effective_listed_days = item.listed_days
+    listing_age_source = "provider"
+    if effective_listed_days <= 0 and daily_bars:
+        effective_listed_days = max((daily_bars[-1].trade_date - daily_bars[0].trade_date).days, 0)
+        listing_age_source = "history_span"
+    metrics["listed_days"] = effective_listed_days
+    metrics["listing_age_source"] = listing_age_source
+    if effective_listed_days <= 0:
+        risks.append("上市时间数据缺失，无法确认是否已上市满 120 天。")
+        return _candidate(item, trading_day, "数据不足", 0, 0, 0, 0, 90, evidence, risks, metrics, theme_names, source_ids)
+    if effective_listed_days < 120:
+        risks.append(f"上市时间或可验证历史跨度约 {effective_listed_days} 天，未满 120 天，暂不纳入主板量价启动池。")
         return _candidate(item, trading_day, "数据不足", 0, 0, 0, 0, 90, evidence, risks, metrics, theme_names, source_ids)
 
     if len(daily_bars) < MIN_HISTORY_BARS:
@@ -167,6 +177,9 @@ def evaluate_candidate(
         return _candidate(item, trading_day, "数据不足", 0, 0, 0, 0, 70, evidence, risks, metrics, theme_names, source_ids)
     if amount_ratio20 < 1.15 or volume_ratio20 < 1.05:
         risks.append("当日成交额/成交量未明显高于近 20 日均值，量能确认不足。")
+        return _candidate(item, trading_day, "数据不足", 0, 0, 0, 0, 65, evidence, risks, metrics, theme_names, source_ids)
+    if not amount_step_up or not volume_step_up:
+        risks.append("近 5 日成交额与成交量未同时形成台阶式放大，量价启动结构不完整。")
         return _candidate(item, trading_day, "数据不足", 0, 0, 0, 0, 65, evidence, risks, metrics, theme_names, source_ids)
     if not ma_alignment:
         risks.append("尚未形成收盘价 > MA5 > MA10 > MA20 且 MA20 上行的多头排列。")
