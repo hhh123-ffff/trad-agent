@@ -12,8 +12,11 @@ from .data_providers import (
     news_announcement_provider,
 )
 from .database import get_redis
+from .data_freshness import DataFreshnessResult, evaluate_data_freshness
+from .job_pipeline import StepOutcome, aggregate_pipeline_status, run_pipeline_step
 from .market_provider import CN_TZ
 from .models import DailyTrackingReport, InformationDigestItem, InformationSummary, InformationSymbolSummary, JobRun, MarketEvent, MarketSnapshot
+from .notification_service import create_freshness_notification, create_pipeline_notification
 from .repositories import list_watchlist
 from .stealth_repository import list_candidates, list_observations, snapshot_observation_journal
 from .stealth_scanner import run_stealth_scan
@@ -21,6 +24,7 @@ from .tracking_repository import (
     create_job_run,
     finish_job_run,
     get_daily_tracking_report,
+    load_data_freshness_inputs,
     list_announcement_items,
     list_job_runs,
     list_market_events,
@@ -61,6 +65,12 @@ def run_tracking_job(job_name: str) -> JobRun:
         return finish_job_run(run.id, "failed", message="同名任务正在运行，已跳过本次触发。", error="job locked")
 
     try:
+        if normalized == "post_market_replay":
+            scope, message, status = _durable_post_market_replay_job(run.id)
+            completed = finish_job_run(run.id, status, message=message, affected_scope=scope)
+            create_pipeline_notification(completed)
+            create_freshness_notification(run.id, DataFreshnessResult(**scope["data_freshness"]))
+            return completed
         handler = _job_handlers()[normalized]
         scope, message = handler()
         return finish_job_run(run.id, "completed", message=message, affected_scope=scope)
@@ -579,6 +589,85 @@ def _agent_post_market_job() -> tuple[dict[str, object], str]:
     if run.status == "degraded":
         message = "盘后研究 Agent 工作流已降级完成，确定性日报仍可用。"
     return scope, message
+
+
+def _durable_post_market_replay_job(job_run_id: str) -> tuple[dict[str, object], str, str]:
+    state: dict[str, object] = {
+        "trading_day": datetime.now(CN_TZ).date(),
+        "active_themes": [],
+        "report_completed": False,
+    }
+
+    def close_snapshot_step() -> StepOutcome:
+        snapshot = capture_market_snapshot()
+        state["trading_day"] = snapshot.captured_at.date()
+        state["active_themes"] = [sector.name for sector in snapshot.sectors[:8]]
+        return StepOutcome(result_scope={"snapshot_id": snapshot.id, "events": len(snapshot.event_ids)})
+
+    def information_step() -> StepOutcome:
+        news, announcements = collect_news_and_announcements()
+        return StepOutcome(result_scope={"news": len(news), "announcements": len(announcements)})
+
+    def scan_step() -> StepOutcome:
+        if os.getenv("MARKETLENS_POST_MARKET_ENABLE_SCAN", "1").strip() == "0":
+            return StepOutcome(status="skipped", result_scope={"reason": "MARKETLENS_POST_MARKET_ENABLE_SCAN=0"})
+        result = run_stealth_scan(
+            limit=_post_market_scan_limit(),
+            offset=_post_market_scan_offset(),
+            active_themes=list(state["active_themes"]),
+            include_watchlist=True,
+        )
+        return StepOutcome(
+            result_scope={
+                "trading_day": result.trading_day.isoformat(),
+                "total": result.total,
+                "scanned": result.scanned,
+                "saved": result.saved,
+                "failed": result.failed,
+                "stages": result.stages,
+            }
+        )
+
+    def journal_step() -> StepOutcome:
+        journal = snapshot_observation_journal()
+        return StepOutcome(result_scope={"observation_journal": len(journal)})
+
+    def report_step() -> StepOutcome:
+        report = build_daily_tracking_report(state["trading_day"])
+        state["report_completed"] = True
+        return StepOutcome(result_scope={"trading_day": report.trading_day.isoformat(), "sections": len(report.sections)})
+
+    def agent_step() -> StepOutcome:
+        if not state["report_completed"]:
+            return StepOutcome(status="skipped", result_scope={"reason": "daily_report_failed"})
+        agent_scope, _ = _agent_post_market_job()
+        status = "degraded" if agent_scope.get("agent_status") == "degraded" else "completed"
+        return StepOutcome(status=status, result_scope=agent_scope)
+
+    step_handlers: list[tuple[str, Callable[[], StepOutcome]]] = [
+        ("close_snapshot", close_snapshot_step),
+        ("collect_information", information_step),
+        ("stealth_scan", scan_step),
+        ("observation_journal", journal_step),
+        ("daily_report", report_step),
+        ("agent_post_market", agent_step),
+    ]
+    latest_steps = [run_pipeline_step(job_run_id, name, handler) for name, handler in step_handlers]
+    status = aggregate_pipeline_status(latest_steps)
+    freshness = evaluate_data_freshness(state["trading_day"], load_data_freshness_inputs())
+    if freshness.status != "fresh" and status == "completed":
+        status = "degraded"
+    scope: dict[str, object] = {
+        "trading_day": state["trading_day"].isoformat(),
+        "steps": {step.step_name: step.result_scope for step in latest_steps},
+        "data_freshness": freshness.model_dump(mode="json"),
+    }
+    message = "盘后一键复盘已完成，六个闭环步骤均已记录。"
+    if status == "degraded":
+        message = "盘后一键复盘已降级完成；日报基于可用数据生成，请查看失败步骤和数据缺口。"
+    elif status == "failed":
+        message = "盘后一键复盘失败；确定性日报未能生成，请查看步骤详情并重跑。"
+    return scope, message, status
 
 
 def _post_market_replay_job() -> tuple[dict[str, object], str]:

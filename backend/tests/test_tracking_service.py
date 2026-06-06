@@ -1,172 +1,162 @@
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from backend.app import tracking_service
+from backend.app.data_freshness import DataFreshnessInputs, DataFreshnessResult, FreshnessCheck
+from backend.app.database import connect, init_schema
+from backend.app.tracking_repository import list_app_notifications, list_job_run_steps
 
 
-def test_post_market_replay_job_continues_when_information_source_fails(monkeypatch):
-    calls: list[str] = []
-    captured_at = datetime(2026, 6, 1, 20, 10, tzinfo=timezone.utc)
+TRADING_DAY = date(2026, 6, 1)
+
+
+def _delete_run(run_id: str) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM app_notifications WHERE related_job_run_id = %s", (run_id,))
+        conn.execute("DELETE FROM job_run_steps WHERE job_run_id = %s", (run_id,))
+        conn.execute("DELETE FROM job_runs WHERE id = %s", (run_id,))
+
+
+def _fresh_result(status: str = "fresh") -> DataFreshnessResult:
+    check = FreshnessCheck(
+        scope="market_snapshot",
+        status=status,
+        expected_date=TRADING_DAY,
+        actual_date=TRADING_DAY if status == "fresh" else date(2026, 5, 29),
+        message="freshness test",
+    )
+    return DataFreshnessResult(status=status, checks=[check])
+
+
+@pytest.fixture(autouse=True)
+def replay_dependencies(monkeypatch):
+    init_schema()
+    monkeypatch.setenv("MARKETLENS_POST_MARKET_ENABLE_SCAN", "1")
+    monkeypatch.setattr(tracking_service, "_acquire_lock", lambda _: "test-lock")
+    monkeypatch.setattr(tracking_service, "_release_lock", lambda *_: None)
+    monkeypatch.setattr(tracking_service, "load_data_freshness_inputs", lambda: DataFreshnessInputs())
+    monkeypatch.setattr(tracking_service, "evaluate_data_freshness", lambda *_: _fresh_result())
+
+
+def _install_successful_steps(monkeypatch, calls: list[str]) -> None:
     snapshot = SimpleNamespace(
         id="snapshot-1",
-        event_ids=[],
-        sectors=[],
-        captured_at=captured_at,
+        event_ids=["event-1"],
+        sectors=[SimpleNamespace(name="semiconductor")],
+        captured_at=datetime(2026, 6, 1, 15, 5, tzinfo=timezone.utc),
     )
-    report = SimpleNamespace(trading_day=date(2026, 6, 1), sections=[{"title": "data quality"}])
+    report = SimpleNamespace(trading_day=TRADING_DAY, sections=[{"title": "data quality"}])
 
-    def fake_snapshot():
-        calls.append("snapshot")
-        return snapshot
+    monkeypatch.setattr(tracking_service, "capture_market_snapshot", lambda: calls.append("close_snapshot") or snapshot)
+    monkeypatch.setattr(
+        tracking_service,
+        "collect_news_and_announcements",
+        lambda: calls.append("collect_information") or ([object()], [object()]),
+    )
+    monkeypatch.setattr(
+        tracking_service,
+        "run_stealth_scan",
+        lambda **_: calls.append("stealth_scan")
+        or SimpleNamespace(trading_day=TRADING_DAY, total=1, scanned=1, saved=1, failed=0, stages={"watch": 1}),
+    )
+    monkeypatch.setattr(tracking_service, "snapshot_observation_journal", lambda: calls.append("observation_journal") or [object()])
+    monkeypatch.setattr(tracking_service, "build_daily_tracking_report", lambda _: calls.append("daily_report") or report)
+    monkeypatch.setattr(
+        tracking_service,
+        "_agent_post_market_job",
+        lambda: calls.append("agent_post_market") or ({"agent_status": "completed", "agent_run_id": "agent-1"}, "agent complete"),
+    )
 
-    def fake_news():
-        calls.append("news")
+
+def test_post_market_replay_persists_six_completed_steps(monkeypatch):
+    calls: list[str] = []
+    _install_successful_steps(monkeypatch, calls)
+
+    run = tracking_service.run_tracking_job("post_market_replay")
+    try:
+        steps = list_job_run_steps(run.id)
+        assert run.status == "completed"
+        assert calls == [
+            "close_snapshot",
+            "collect_information",
+            "stealth_scan",
+            "observation_journal",
+            "daily_report",
+            "agent_post_market",
+        ]
+        assert [step.step_name for step in steps] == calls
+        assert all(step.status == "completed" for step in steps)
+        assert run.affected_scope["data_freshness"]["status"] == "fresh"
+        assert any(item.notification_type == "pipeline_completed" for item in list_app_notifications(limit=20) if item.related_job_run_id == run.id)
+    finally:
+        _delete_run(run.id)
+
+
+def test_post_market_replay_degrades_missing_credentials_and_continues(monkeypatch):
+    calls: list[str] = []
+    _install_successful_steps(monkeypatch, calls)
+
+    def missing_information():
+        calls.append("collect_information")
         raise RuntimeError("THS token missing")
 
-    def fake_scan(**kwargs):
-        calls.append("scan")
-        return SimpleNamespace(
-            trading_day=date(2026, 6, 1),
-            total=0,
-            scanned=0,
-            saved=0,
-            failed=0,
-            stages={},
-        )
+    monkeypatch.setattr(tracking_service, "collect_news_and_announcements", missing_information)
 
-    def fake_journal():
-        calls.append("journal")
-        return []
-
-    def fake_report(trading_day):
-        calls.append("report")
-        assert trading_day == date(2026, 6, 1)
-        return report
-
-    monkeypatch.setenv("MARKETLENS_POST_MARKET_ENABLE_SCAN", "1")
-    monkeypatch.setattr(tracking_service, "capture_market_snapshot", fake_snapshot)
-    monkeypatch.setattr(tracking_service, "collect_news_and_announcements", fake_news)
-    monkeypatch.setattr(tracking_service, "run_stealth_scan", fake_scan)
-    monkeypatch.setattr(tracking_service, "snapshot_observation_journal", fake_journal)
-    monkeypatch.setattr(tracking_service, "build_daily_tracking_report", fake_report)
-
-    scope, message = tracking_service._post_market_replay_job()
-
-    assert calls == ["snapshot", "news", "scan", "journal", "report"]
-    assert scope["information"]["status"] == "failed"
-    assert scope["information"]["error"] == "THS token missing"
-    assert scope["news"] == 0
-    assert scope["announcements"] == 0
-    assert scope["report_sections"] == 1
-    assert "部分完成" in message
+    run = tracking_service.run_tracking_job("post_market_replay")
+    try:
+        steps = list_job_run_steps(run.id)
+        information = next(step for step in steps if step.step_name == "collect_information")
+        assert run.status == "degraded"
+        assert information.status == "failed"
+        assert information.error_code == "missing_credentials"
+        assert information.attempt == 1
+        assert "daily_report" in calls
+        assert "agent_post_market" in calls
+        assert any(item.notification_type == "pipeline_degraded" for item in list_app_notifications(limit=20) if item.related_job_run_id == run.id)
+    finally:
+        _delete_run(run.id)
 
 
-def test_post_market_replay_job_runs_bounded_close_loop(monkeypatch):
+def test_post_market_replay_fails_when_daily_report_fails(monkeypatch):
     calls: list[str] = []
-    captured_at = datetime(2026, 6, 1, 20, 10, tzinfo=timezone.utc)
-    snapshot = SimpleNamespace(
-        id="snapshot-1",
-        event_ids=["event-1", "event-2"],
-        sectors=[SimpleNamespace(name="半导体"), SimpleNamespace(name="机器人")],
-        captured_at=captured_at,
-    )
-    report = SimpleNamespace(trading_day=date(2026, 6, 1), sections=[{"title": "市场温度"}])
+    _install_successful_steps(monkeypatch, calls)
 
-    def fake_snapshot():
-        calls.append("snapshot")
-        return snapshot
+    def failed_report(_):
+        calls.append("daily_report")
+        raise RuntimeError("report generation failed")
 
-    def fake_news():
-        calls.append("news")
-        return [object()], [object(), object()]
+    monkeypatch.setattr(tracking_service, "build_daily_tracking_report", failed_report)
 
-    def fake_scan(**kwargs):
-        calls.append("scan")
-        assert kwargs["limit"] == 12
-        assert kwargs["offset"] == 5
-        assert kwargs["active_themes"] == ["半导体", "机器人"]
-        assert kwargs["include_watchlist"] is True
-        return SimpleNamespace(
-            trading_day=date(2026, 6, 1),
-            total=12,
-            scanned=12,
-            saved=3,
-            failed=0,
-            stages={"潜伏观察": 2, "启动确认": 1},
-        )
-
-    def fake_journal():
-        calls.append("journal")
-        return [object()]
-
-    def fake_report(trading_day):
-        calls.append("report")
-        assert trading_day == date(2026, 6, 1)
-        return report
-
-    monkeypatch.setenv("MARKETLENS_POST_MARKET_ENABLE_SCAN", "1")
-    monkeypatch.setenv("MARKETLENS_POST_MARKET_SCAN_LIMIT", "12")
-    monkeypatch.setenv("MARKETLENS_POST_MARKET_SCAN_OFFSET", "5")
-    monkeypatch.setattr(tracking_service, "capture_market_snapshot", fake_snapshot)
-    monkeypatch.setattr(tracking_service, "collect_news_and_announcements", fake_news)
-    monkeypatch.setattr(tracking_service, "run_stealth_scan", fake_scan)
-    monkeypatch.setattr(tracking_service, "snapshot_observation_journal", fake_journal)
-    monkeypatch.setattr(tracking_service, "build_daily_tracking_report", fake_report)
-
-    scope, message = tracking_service._post_market_replay_job()
-
-    assert calls == ["snapshot", "news", "scan", "journal", "report"]
-    assert scope["snapshot_id"] == "snapshot-1"
-    assert scope["news"] == 1
-    assert scope["announcements"] == 2
-    assert scope["observation_journal"] == 1
-    assert scope["scan"]["saved"] == 3
-    assert "盘后一键复盘已完成" in message
+    run = tracking_service.run_tracking_job("post_market_replay")
+    try:
+        steps = list_job_run_steps(run.id)
+        report = next(step for step in steps if step.step_name == "daily_report")
+        agent = next(step for step in steps if step.step_name == "agent_post_market")
+        assert run.status == "failed"
+        assert report.status == "failed"
+        assert agent.status == "skipped"
+        assert "agent_post_market" not in calls
+        assert any(item.notification_type == "pipeline_failed" for item in list_app_notifications(limit=20) if item.related_job_run_id == run.id)
+    finally:
+        _delete_run(run.id)
 
 
-def test_post_market_replay_job_continues_when_snapshot_fails(monkeypatch):
+def test_post_market_replay_degrades_and_notifies_when_data_is_stale(monkeypatch):
     calls: list[str] = []
-    report = SimpleNamespace(trading_day=date(2026, 6, 1), sections=[{"title": "数据质量与缺口"}])
+    _install_successful_steps(monkeypatch, calls)
+    monkeypatch.setattr(tracking_service, "evaluate_data_freshness", lambda *_: _fresh_result("stale"))
 
-    def fake_snapshot():
-        calls.append("snapshot")
-        raise RuntimeError("行情源不可用")
-
-    def fake_news():
-        calls.append("news")
-        return [], []
-
-    def fake_scan(**kwargs):
-        calls.append("scan")
-        assert kwargs["active_themes"] == []
-        return SimpleNamespace(
-            trading_day=date(2026, 6, 1),
-            total=0,
-            scanned=0,
-            saved=0,
-            failed=0,
-            stages={},
-        )
-
-    def fake_journal():
-        calls.append("journal")
-        return []
-
-    def fake_report(trading_day):
-        calls.append("report")
-        return report
-
-    monkeypatch.setenv("MARKETLENS_POST_MARKET_ENABLE_SCAN", "1")
-    monkeypatch.setenv("MARKETLENS_POST_MARKET_SCAN_LIMIT", "1")
-    monkeypatch.setattr(tracking_service, "capture_market_snapshot", fake_snapshot)
-    monkeypatch.setattr(tracking_service, "collect_news_and_announcements", fake_news)
-    monkeypatch.setattr(tracking_service, "run_stealth_scan", fake_scan)
-    monkeypatch.setattr(tracking_service, "snapshot_observation_journal", fake_journal)
-    monkeypatch.setattr(tracking_service, "build_daily_tracking_report", fake_report)
-
-    scope, message = tracking_service._post_market_replay_job()
-
-    assert calls == ["snapshot", "news", "scan", "journal", "report"]
-    assert scope["snapshot"]["status"] == "failed"
-    assert scope["events"] == 0
-    assert "部分完成" in message
+    run = tracking_service.run_tracking_job("post_market_replay")
+    try:
+        notification_types = {
+            item.notification_type
+            for item in list_app_notifications(limit=20)
+            if item.related_job_run_id == run.id
+        }
+        assert run.status == "degraded"
+        assert run.affected_scope["data_freshness"]["status"] == "stale"
+        assert notification_types == {"pipeline_degraded", "data_stale"}
+    finally:
+        _delete_run(run.id)
