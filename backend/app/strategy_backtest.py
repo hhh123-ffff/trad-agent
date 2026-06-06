@@ -296,3 +296,14 @@ def sync_live_signal_outcomes(trading_day: date) -> StrategyLiveOutcomeSummary:
         summary=summary,
         limitations=["真实信号样本与历史回放分开统计，样本量不足时结论置信度较低。"],
     )
+
+
+def build_live_outcome_summary() -> StrategyLiveOutcomeSummary:
+    outcomes = list_signal_outcomes(origin="live", limit=10_000)
+    summary = aggregate_signal_outcomes(outcomes)
+    return StrategyLiveOutcomeSummary(
+        total_signals=len(outcomes),
+        mature_signals=int(summary["mature_primary_signals"]),
+        summary=summary,
+        limitations=["真实信号样本与历史回放分开统计，样本量不足时结论置信度较低。"],
+    )

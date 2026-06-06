@@ -64,6 +64,12 @@ from .models import (
     StealthScanFailure,
     StealthScanRunRequest,
     StealthScanTask,
+    StrategyBacktestDetail,
+    StrategyBacktestFunnel,
+    StrategyBacktestRequest,
+    StrategyBacktestRun,
+    StrategyLiveOutcomeSummary,
+    StrategySignalOutcome,
     WatchlistItemCreate,
     WatchlistItemUpdate,
     WatchlistStock,
@@ -98,6 +104,16 @@ from .stealth_repository import (
     snapshot_observation_journal,
 )
 from .stealth_tasks import enqueue_failed_symbols_retry, enqueue_stealth_scan_task
+from .strategy_backtest import build_live_outcome_summary
+from .strategy_backtest_repository import (
+    get_backtest_detail,
+    get_backtest_funnel,
+    get_backtest_run,
+    get_latest_backtest_run,
+    list_signal_outcomes,
+    mark_unfinished_backtests_failed,
+)
+from .strategy_backtest_tasks import enqueue_strategy_backtest
 from .tracking_repository import list_announcement_items, list_market_events, list_market_snapshots, list_news_items
 from .tracking_scheduler import start_scheduler, stop_scheduler
 from .tracking_repository import list_app_notifications, mark_app_notification_read
@@ -123,6 +139,7 @@ _market_cache_lock = Lock()
 async def lifespan(_: FastAPI):
     ensure_storage()
     mark_unfinished_scan_tasks_failed()
+    mark_unfinished_backtests_failed()
     start_scheduler()
     yield
     stop_scheduler()
@@ -433,6 +450,62 @@ def stealth_retry_scan_task_failures(task_id: str) -> StealthScanTask:
     if retry_task is None:
         raise HTTPException(status_code=409, detail="No unresolved failures to retry.")
     return retry_task
+
+
+@app.post("/api/strategy/backtests/run", response_model=StrategyBacktestRun)
+def strategy_backtest_run(payload: StrategyBacktestRequest) -> StrategyBacktestRun:
+    if payload.start_date and payload.end_date and payload.start_date > payload.end_date:
+        raise HTTPException(status_code=422, detail="start_date must not be after end_date.")
+    return enqueue_strategy_backtest(payload)
+
+
+@app.get("/api/strategy/backtests/latest", response_model=StrategyBacktestRun)
+def strategy_latest_backtest() -> StrategyBacktestRun:
+    run = get_latest_backtest_run()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No strategy backtest has been run.")
+    return run
+
+
+@app.get("/api/strategy/backtests/{run_id}", response_model=StrategyBacktestDetail)
+def strategy_backtest_detail(run_id: str) -> StrategyBacktestDetail:
+    detail = get_backtest_detail(run_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Strategy backtest not found.")
+    return detail
+
+
+@app.get("/api/strategy/backtests/{run_id}/signals", response_model=list[StrategySignalOutcome])
+def strategy_backtest_signals(
+    run_id: str,
+    stage: str | None = None,
+    primary_only: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[StrategySignalOutcome]:
+    if get_backtest_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Strategy backtest not found.")
+    return list_signal_outcomes(
+        backtest_run_id=run_id,
+        origin="replay",
+        stage=stage,
+        primary_only=primary_only,
+        limit=min(max(limit, 1), 500),
+        offset=max(offset, 0),
+    )
+
+
+@app.get("/api/strategy/backtests/{run_id}/funnel", response_model=StrategyBacktestFunnel)
+def strategy_backtest_funnel(run_id: str) -> StrategyBacktestFunnel:
+    funnel = get_backtest_funnel(run_id)
+    if funnel is None:
+        raise HTTPException(status_code=404, detail="Strategy backtest funnel not found.")
+    return funnel
+
+
+@app.get("/api/strategy/live-outcomes", response_model=StrategyLiveOutcomeSummary)
+def strategy_live_outcomes() -> StrategyLiveOutcomeSummary:
+    return build_live_outcome_summary()
 
 
 @app.post("/api/stealth/scan/tasks/{task_id}/resolve-failures")

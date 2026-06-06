@@ -22,11 +22,15 @@ from backend.app.models import (
     SectorSnapshot,
     StealthScanTask,
     StockUniverseItem,
+    StrategyLiveOutcomeSummary,
+    StrategySignalOutcome,
+    StrategyBacktestRequest,
     ThemeMembership,
     WatchlistItemCreate,
 )
 from backend.app.stealth_repository import create_scan_task, list_candidates, record_scan_failure, save_daily_bars, save_scan_results
 from backend.app.stealth_scanner import evaluate_candidate
+from backend.app.strategy_backtest_repository import create_backtest_run, save_backtest_funnel, save_signal_outcomes
 from backend.app.tracking_repository import (
     _day_window,
     create_app_notification,
@@ -1037,3 +1041,62 @@ def test_admin_job_detail_step_rerun_and_notifications(monkeypatch):
         with connect() as conn:
             conn.execute("DELETE FROM app_notifications WHERE id = %s", (notification.id,))
         _delete_tracking_test_rows()
+
+
+def test_strategy_backtest_and_live_outcome_api_routes(monkeypatch):
+    run = create_backtest_run(StrategyBacktestRequest(start_date=date(2026, 5, 1), end_date=date(2026, 5, 31)))
+    signal = StrategySignalOutcome(
+        id=f"{run.id}-signal",
+        origin="replay",
+        backtest_run_id=run.id,
+        signal_date=date(2026, 5, 20),
+        symbol="600000.SH",
+        name="浦发银行",
+        stage="启动确认",
+        total_score=80,
+        included_primary=True,
+    )
+    save_signal_outcomes([signal])
+    save_backtest_funnel(run.id, {"primary_signals": 1})
+    monkeypatch.setattr(main_module, "enqueue_strategy_backtest", lambda _: run)
+    monkeypatch.setattr(
+        main_module,
+        "build_live_outcome_summary",
+        lambda: StrategyLiveOutcomeSummary(total_signals=2, mature_signals=1, summary={"confidence": "low"}),
+    )
+
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                "/api/strategy/backtests/run",
+                json={"start_date": "2026-05-01", "end_date": "2026-05-31", "repeat_days": 3},
+            )
+            latest = client.get("/api/strategy/backtests/latest")
+            detail = client.get(f"/api/strategy/backtests/{run.id}")
+            signals = client.get(f"/api/strategy/backtests/{run.id}/signals?stage=启动确认&primary_only=true&limit=10")
+            funnel = client.get(f"/api/strategy/backtests/{run.id}/funnel")
+            live = client.get("/api/strategy/live-outcomes")
+            invalid = client.post(
+                "/api/strategy/backtests/run",
+                json={"start_date": "2026-06-01", "end_date": "2026-05-01"},
+            )
+            missing = client.get("/api/strategy/backtests/unknown-run")
+
+        assert created.status_code == 200
+        assert created.json()["id"] == run.id
+        assert latest.status_code == 200
+        assert latest.json()["id"] == run.id
+        assert detail.status_code == 200
+        assert detail.json()["funnel"]["counts"]["primary_signals"] == 1
+        assert signals.status_code == 200
+        assert signals.json()[0]["symbol"] == "600000.SH"
+        assert funnel.status_code == 200
+        assert live.status_code == 200
+        assert live.json()["mature_signals"] == 1
+        assert invalid.status_code == 422
+        assert missing.status_code == 404
+    finally:
+        with connect() as conn:
+            conn.execute("DELETE FROM strategy_signal_outcomes WHERE backtest_run_id = %s", (run.id,))
+            conn.execute("DELETE FROM strategy_backtest_funnel WHERE backtest_run_id = %s", (run.id,))
+            conn.execute("DELETE FROM strategy_backtest_runs WHERE id = %s", (run.id,))
