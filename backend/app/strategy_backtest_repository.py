@@ -7,6 +7,8 @@ from psycopg.types.json import Jsonb
 
 from .database import connect
 from .models import (
+    DailyBar,
+    StockUniverseItem,
     StrategyBacktestDetail,
     StrategyBacktestFunnel,
     StrategyBacktestRequest,
@@ -70,6 +72,62 @@ def get_latest_backtest_run() -> StrategyBacktestRun | None:
     with connect() as conn:
         row = conn.execute("SELECT * FROM strategy_backtest_runs ORDER BY created_at DESC LIMIT 1").fetchone()
     return _run(row) if row else None
+
+
+def load_backtest_dataset(request: StrategyBacktestRequest) -> list[tuple[StockUniverseItem, list[DailyBar]]]:
+    where = ["d.adjust = 'qfq'"]
+    values: list[Any] = []
+    if request.symbols:
+        where.append("d.symbol = ANY(%s)")
+        values.append([symbol.upper() for symbol in request.symbols])
+    if request.end_date:
+        where.append("d.trade_date <= %s")
+        values.append(request.end_date)
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                d.*,
+                COALESCE(u.name, d.symbol) AS name,
+                COALESCE(u.is_st, FALSE) AS is_st,
+                COALESCE(u.listed_days, 0) AS listed_days,
+                COALESCE(u.market, 'A股') AS market
+            FROM daily_bars d
+            LEFT JOIN stock_universe u ON u.symbol = d.symbol
+            WHERE {' AND '.join(where)}
+            ORDER BY d.symbol, d.trade_date
+            """,
+            tuple(values),
+        ).fetchall()
+    grouped: dict[str, tuple[StockUniverseItem, list[DailyBar]]] = {}
+    for row in rows:
+        if row["symbol"] not in grouped:
+            grouped[row["symbol"]] = (
+                StockUniverseItem(
+                    symbol=row["symbol"],
+                    name=row["name"],
+                    is_st=bool(row["is_st"]),
+                    listed_days=int(row["listed_days"]),
+                    market=row["market"],
+                ),
+                [],
+            )
+        grouped[row["symbol"]][1].append(
+            DailyBar(
+                symbol=row["symbol"],
+                trade_date=row["trade_date"],
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+                volume=float(row["volume"]),
+                amount=float(row["amount"]),
+                change_pct=float(row["change_pct"]),
+                turnover_rate=float(row["turnover_rate"]),
+                adjust=row["adjust"],
+            )
+        )
+    return list(grouped.values())
 
 
 def save_signal_outcomes(outcomes: list[StrategySignalOutcome]) -> None:
