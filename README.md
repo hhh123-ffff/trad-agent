@@ -45,6 +45,33 @@ npm run smoke:replay:scan
 ```bash
 npm run test:api
 npm run build
+npm run smoke:backtest
+```
+
+## Strategy quality and backtest workflow
+
+The `#stealth` workspace starts with a strategy-quality audit area. It keeps deterministic historical replay and real post-market signals separate:
+
+- `POST /api/strategy/backtests/run` creates a single-worker local replay task.
+- `GET /api/strategy/backtests/latest` and `GET /api/strategy/backtests/{run_id}` expose persisted status and summary.
+- `GET /api/strategy/backtests/{run_id}/signals` and `/funnel` expose auditable samples and filter counts.
+- `GET /api/strategy/live-outcomes` reports only signals recorded by actual post-market scans.
+
+Historical replay uses the next trading day's open as the entry baseline and measures 1/3/5/10-day close return, favorable excursion, adverse excursion, benchmark return, and excess return. The replay passes only bars available through each signal day into the strategy evaluator.
+
+Historical float market cap is estimated from daily amount and turnover rate:
+
+```text
+float_cap_billion = amount / turnover_rate / 1,000,000
+```
+
+Known limits are always displayed: historical themes and ST status are incomplete, minute-line conditions are unavailable, float cap is estimated, the local history window may be short, and the stock universe can contain survivorship bias. Low sample counts remain low-confidence evidence rather than directional conclusions.
+
+Run a bounded end-to-end check against up to three locally persisted symbols:
+
+```bash
+npm run db:up
+npm run smoke:backtest
 ```
 
 ## Architecture

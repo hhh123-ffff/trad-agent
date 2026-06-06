@@ -10,6 +10,7 @@
     "api:ths": "python tools/run_api_ths.py",
     "smoke:replay": "python tools/post_market_replay_smoke.py",
     "smoke:replay:scan": "python tools/post_market_replay_smoke.py --scan",
+    "smoke:backtest": "python tools/strategy_backtest_smoke.py",
     "test:api": "pytest backend/tests -q",
     "db:up": "docker compose up -d postgres redis",
     "db:down": "docker compose down",

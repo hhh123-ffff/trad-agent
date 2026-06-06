@@ -118,7 +118,7 @@ export function StrategyQuality() {
   const isActive = run?.status === "queued" || run?.status === "running";
 
   return (
-    <section className="mb-5 border-b border-ink/10 pb-5">
+    <section className="mb-5 min-w-0 max-w-full border-b border-ink/10 pb-5">
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-ink">
@@ -265,8 +265,8 @@ export function StrategyQuality() {
             </div>
           </div>
 
-          <div className="mt-4 grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
-            <div>
+          <div className="mt-4 grid min-w-0 gap-5 xl:grid-cols-[1.25fr_0.75fr]">
+            <div className="min-w-0">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-semibold text-ink">近期主样本</h4>
                 <span className="text-[11px] text-muted">次日开盘作为结果基准</span>
