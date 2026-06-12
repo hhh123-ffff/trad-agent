@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata = {
-  title: "MarketLens 盘面助手",
-  description: "A股盘前参考与盘后复盘 SaaS",
+  title: "观澜",
+  description: "A 股盘后复盘与公开信息候选观察工作台",
   manifest: "/manifest.json"
 };
 

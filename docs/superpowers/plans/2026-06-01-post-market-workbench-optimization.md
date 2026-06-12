@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make MarketLens feel like a daily post-market research workbench: open the app, see whether data collection succeeded, read the full replay report, inspect news/announcement gaps, and move candidate stocks through an observation funnel.
+**Goal:** Make Guanlan feel like a daily post-market research workbench: open the app, see whether data collection succeeded, read the full replay report, inspect news/announcement gaps, and move candidate stocks through an observation funnel.
 
 **Architecture:** Preserve the existing FastAPI routes and Next.js app shell. Add typed backend status metadata for data-source capabilities, split the large dashboard component into focused view/components, and make Replay the primary workflow without changing the compliance boundary or adding trade advice.
 
@@ -36,7 +36,7 @@ Create:
 - `lib/job-status.ts`: pure helpers for extracting typed post-market job step state from `JobRun`.
 
 Modify:
-- `components/marketlens-dashboard.tsx`: make Replay the default workflow, pass data into `ReplayView`, and remove Replay/job/data-source rendering internals after extraction.
+- `components/guanlan-dashboard.tsx`: make Replay the default workflow, pass data into `ReplayView`, and remove Replay/job/data-source rendering internals after extraction.
 - `lib/types.ts`: add `DataSourceStatus` and optional `AgentStatusResponse.data_source_statuses`.
 - `backend/app/models.py`: add `DataSourceStatus` and extend `AgentStatusResponse`.
 - `backend/app/data_providers.py`: add `data_source_statuses()` helper built from configured providers and env state.
@@ -352,11 +352,11 @@ Expected: TypeScript build passes.
 **Files:**
 - Create: `components/replay/daily-report.tsx`
 - Create: `components/replay/job-pipeline.tsx`
-- Modify: `components/marketlens-dashboard.tsx`
+- Modify: `components/guanlan-dashboard.tsx`
 
 - [ ] **Step 1: Move daily report rendering**
 
-Create `components/replay/daily-report.tsx` by moving these existing functions from `components/marketlens-dashboard.tsx` without changing behavior:
+Create `components/replay/daily-report.tsx` by moving these existing functions from `components/guanlan-dashboard.tsx` without changing behavior:
 
 ```ts
 DailyReportSection
@@ -425,7 +425,7 @@ function PipelineIcon({ status }: { status: PipelineStatus }) {
 
 - [ ] **Step 3: Replace old ReplayPanel internals**
 
-In `components/marketlens-dashboard.tsx`, change `ReplayPanel` to compose:
+In `components/guanlan-dashboard.tsx`, change `ReplayPanel` to compose:
 
 ```tsx
 function ReplayPanel({ replay, trackingDaily, jobRuns, trackingError }: {
@@ -460,7 +460,7 @@ Expected: build succeeds and no duplicate function names remain.
 - Create: `components/replay/candidate-funnel.tsx`
 - Create: `components/data-sources/data-source-status.tsx`
 - Create: `components/views/replay-view.tsx`
-- Modify: `components/marketlens-dashboard.tsx`
+- Modify: `components/guanlan-dashboard.tsx`
 
 - [ ] **Step 1: Create candidate funnel component**
 
@@ -596,7 +596,7 @@ export function ReplayView({
 
 - [ ] **Step 4: Make Replay the default view**
 
-In `components/marketlens-dashboard.tsx`, change:
+In `components/guanlan-dashboard.tsx`, change:
 
 ```ts
 function viewFromHash(): ViewId {
@@ -642,7 +642,7 @@ Expected: build succeeds and Replay opens as the default view when no hash is pr
 ## Task 5: Keep Data Status As The Manual Control Room
 
 **Files:**
-- Modify: `components/marketlens-dashboard.tsx`
+- Modify: `components/guanlan-dashboard.tsx`
 - Use: `components/data-sources/data-source-status.tsx`
 
 - [ ] **Step 1: Reuse provider status in DataStatusView**

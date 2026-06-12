@@ -73,7 +73,7 @@ def test_tracking_job_lock_uses_local_mutex_when_redis_unavailable(monkeypatch):
             raise RuntimeError("redis unavailable")
 
     monkeypatch.setattr(tracking_service, "get_redis", lambda: BrokenRedis())
-    lock_key = "marketlens:test-lock:redis-down"
+    lock_key = "guanlan:test-lock:redis-down"
 
     first = tracking_service._acquire_lock(lock_key)
     second = tracking_service._acquire_lock(lock_key)

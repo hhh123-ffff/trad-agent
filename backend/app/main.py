@@ -114,9 +114,9 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="MarketLens API",
+    title="观澜 API",
     version="0.2.0",
-    description="A-share pre-open reference and post-market replay SaaS API.",
+    description="观澜后端 API，提供 A 股盘后复盘、公开信息整理和候选观察能力。",
     lifespan=lifespan,
 )
 
@@ -206,7 +206,7 @@ def health() -> dict[str, object]:
     redis_ok = check_redis()
     return {
         "status": "ok" if postgres_ok and redis_ok else "degraded",
-        "service": "marketlens-api",
+        "service": "guanlan-api",
         "postgres": postgres_ok,
         "redis": redis_ok,
     }

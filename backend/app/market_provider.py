@@ -96,7 +96,7 @@ def _get_json(url: str, params: dict[str, Any]) -> dict[str, Any]:
             params=params,
             timeout=QUOTE_TIMEOUT,
             headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MarketLens/0.2",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Guanlan/0.2",
                 "Referer": "https://quote.eastmoney.com/",
                 "Accept": "application/json,text/plain,*/*",
             },
@@ -116,7 +116,7 @@ def _get_sina_json(params: dict[str, Any]) -> list[dict[str, Any]]:
             SINA_MARKET_URL,
             params=params,
             timeout=QUOTE_TIMEOUT,
-            headers={"User-Agent": "Mozilla/5.0 MarketLens/0.2", "Referer": "https://finance.sina.com.cn"},
+            headers={"User-Agent": "Mozilla/5.0 Guanlan/0.2", "Referer": "https://finance.sina.com.cn"},
         )
         response.raise_for_status()
         response.encoding = "gbk"
@@ -133,7 +133,7 @@ def _get_sina_text(codes: list[str]) -> str:
         response = requests.get(
             SINA_QUOTE_URL + ",".join(codes),
             timeout=QUOTE_TIMEOUT,
-            headers={"User-Agent": "Mozilla/5.0 MarketLens/0.2", "Referer": "https://finance.sina.com.cn"},
+            headers={"User-Agent": "Mozilla/5.0 Guanlan/0.2", "Referer": "https://finance.sina.com.cn"},
         )
         response.raise_for_status()
         response.encoding = "gb18030"
