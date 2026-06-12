@@ -163,7 +163,7 @@ def save_scan_results(candidates: list[StealthCandidate]) -> None:
                     candidate.risk_penalty,
                     _json(candidate.evidence),
                     _json(candidate.risks),
-                    _json(candidate.metrics),
+                    _json(_candidate_metrics(candidate)),
                     _json(candidate.source_ids),
                 ),
             )
@@ -990,11 +990,30 @@ def _candidate_from_row(row: dict[str, Any]) -> StealthCandidate:
         metrics=metrics,
         themes=list(row["themes"] or []),
         strategy_horizon=str(metrics.get("strategy_horizon") or "综合观察"),
+        horizon_reason=str(metrics.get("horizon_reason") or ""),
+        evidence_breakdown=_candidate_evidence_breakdown(metrics),
         pattern_tags=list(metrics.get("pattern_tags") or []),
         information_tags=list(metrics.get("information_tags") or []),
         observed=bool(row["observed"]),
         source_ids=row["source_ids"] or ["src-akshare-dev"],
     )
+
+
+def _candidate_metrics(candidate: StealthCandidate) -> dict[str, Any]:
+    metrics = dict(candidate.metrics or {})
+    metrics["strategy_horizon"] = candidate.strategy_horizon
+    metrics["horizon_reason"] = candidate.horizon_reason
+    metrics["evidence_breakdown"] = [item.model_dump() for item in candidate.evidence_breakdown]
+    metrics["pattern_tags"] = list(candidate.pattern_tags)
+    metrics["information_tags"] = list(candidate.information_tags)
+    return metrics
+
+
+def _candidate_evidence_breakdown(metrics: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = metrics.get("evidence_breakdown") or []
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
 
 
 def _observation_from_row(row: dict[str, Any]) -> ObservationItem:

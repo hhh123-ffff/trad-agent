@@ -1844,6 +1844,12 @@ function StealthPanel({
                 <InfoBlock label="题材分" value={activeCandidate.theme_score.toFixed(0)} />
                 <InfoBlock label="风险扣分" value={activeCandidate.risk_penalty.toFixed(0)} tone="danger" />
               </div>
+              {activeCandidate.horizon_reason && (
+                <div className="mt-4 border-l-2 border-pine/40 pl-3">
+                  <p className="text-xs font-semibold text-pine">周期理由</p>
+                  <p className="mt-1 text-xs leading-5 text-muted">{activeCandidate.horizon_reason}</p>
+                </div>
+              )}
               <div className="mt-4 h-48 rounded-lg border border-ink/10 bg-paper/60 p-3">
                 {chartData.length ? (
                   <ResponsiveContainer width="100%" height="100%">
@@ -1859,20 +1865,7 @@ function StealthPanel({
                   <div className="flex h-full items-center justify-center text-sm text-muted">选择候选后加载K线概览</div>
                 )}
               </div>
-              <div className="mt-4 space-y-2">
-                {activeCandidate.evidence.map((item) => (
-                  <p key={item} className="flex gap-2 text-xs leading-5 text-muted">
-                    <CheckCircle2 className="mt-0.5 shrink-0 text-pine" size={14} />
-                    {item}
-                  </p>
-                ))}
-                {activeCandidate.risks.map((item) => (
-                  <p key={item} className="flex gap-2 text-xs leading-5 text-danger">
-                    <AlertTriangle className="mt-0.5 shrink-0" size={14} />
-                    {item}
-                  </p>
-                ))}
-              </div>
+              <EvidenceBreakdownPanel candidate={activeCandidate} />
               <div className="mt-4 flex flex-wrap gap-2">
                 {[...activeCandidate.pattern_tags, ...activeCandidate.information_tags].slice(0, 8).map((tag) => (
                   <span key={tag} className="rounded-md border border-pine/20 bg-pine/10 px-2 py-1 text-xs text-pine">
@@ -1930,6 +1923,70 @@ function HorizonBadge({ horizon }: { horizon: StealthCandidate["strategy_horizon
         ? "border-pine/25 bg-pine/10 text-pine"
         : "border-ink/10 bg-paper text-muted";
   return <span className={`rounded-md border px-2 py-1 text-xs font-semibold ${tone}`}>{horizon}</span>;
+}
+
+function EvidenceBreakdownPanel({ candidate }: { candidate: StealthCandidate }) {
+  const categoryOrder: Array<StealthCandidate["evidence_breakdown"][number]["category"]> = ["量价图形", "题材信息", "新闻公告", "风险提示", "数据质量"];
+  const grouped = categoryOrder
+    .map((category) => ({
+      category,
+      items: candidate.evidence_breakdown.filter((item) => item.category === category)
+    }))
+    .filter((group) => group.items.length > 0);
+
+  if (grouped.length === 0) {
+    return (
+      <div className="mt-4 space-y-2">
+        {candidate.evidence.map((item) => (
+          <p key={item} className="flex gap-2 text-xs leading-5 text-muted">
+            <CheckCircle2 className="mt-0.5 shrink-0 text-pine" size={14} />
+            {item}
+          </p>
+        ))}
+        {candidate.risks.map((item) => (
+          <p key={item} className="flex gap-2 text-xs leading-5 text-danger">
+            <AlertTriangle className="mt-0.5 shrink-0" size={14} />
+            {item}
+          </p>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 space-y-4">
+      {grouped.map((group) => (
+        <div key={group.category}>
+          <p className="text-xs font-semibold text-ink">{group.category}</p>
+          <div className="mt-2 space-y-3">
+            {group.items.map((item) => (
+              <div key={`${group.category}-${item.title}-${item.detail}`} className="border-l-2 border-ink/10 pl-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-xs font-semibold text-ink">{item.title}</p>
+                  <span className={`rounded-md border px-1.5 py-0.5 text-[11px] font-semibold ${evidenceWeightTone(item.weight)}`}>
+                    {evidenceWeightLabel(item.weight)}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs leading-5 text-muted">{item.detail}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function evidenceWeightLabel(weight: StealthCandidate["evidence_breakdown"][number]["weight"]) {
+  if (weight === "high") return "高";
+  if (weight === "medium") return "中";
+  return "低";
+}
+
+function evidenceWeightTone(weight: StealthCandidate["evidence_breakdown"][number]["weight"]) {
+  if (weight === "high") return "border-pine/25 bg-pine/10 text-pine";
+  if (weight === "medium") return "border-signal/25 bg-signal/10 text-signal";
+  return "border-ink/10 bg-paper text-muted";
 }
 
 function journalBucketTone(bucketKey: ObservationJournalEntry["bucket_key"]) {

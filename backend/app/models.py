@@ -247,6 +247,16 @@ class ComplianceCheck(BaseModel):
 
 StealthStage = Literal["潜伏观察", "启动确认", "过热排除", "数据不足"]
 StrategyHorizon = Literal["短线", "中长线", "综合观察"]
+EvidenceCategory = Literal["量价图形", "题材信息", "新闻公告", "风险提示", "数据质量"]
+EvidenceWeight = Literal["high", "medium", "low"]
+
+
+class StealthEvidenceItem(BaseModel):
+    category: EvidenceCategory
+    title: str
+    detail: str
+    weight: EvidenceWeight = "medium"
+    source_ids: list[str] = Field(default_factory=list)
 
 
 class StockUniverseItem(BaseModel):
@@ -292,6 +302,8 @@ class StealthCandidate(BaseModel):
     metrics: dict[str, Any] = Field(default_factory=dict)
     themes: list[str] = Field(default_factory=list)
     strategy_horizon: StrategyHorizon = "综合观察"
+    horizon_reason: str = ""
+    evidence_breakdown: list[StealthEvidenceItem] = Field(default_factory=list)
     pattern_tags: list[str] = Field(default_factory=list)
     information_tags: list[str] = Field(default_factory=list)
     observed: bool = False

@@ -178,6 +178,16 @@ export interface AssistantAnswer {
 }
 
 export type StealthStage = "潜伏观察" | "启动确认" | "过热排除" | "数据不足";
+export type StealthEvidenceCategory = "量价图形" | "题材信息" | "新闻公告" | "风险提示" | "数据质量";
+export type StealthEvidenceWeight = "high" | "medium" | "low";
+
+export interface StealthEvidenceItem {
+  category: StealthEvidenceCategory;
+  title: string;
+  detail: string;
+  weight: StealthEvidenceWeight;
+  source_ids: string[];
+}
 
 export interface DailyBar {
   symbol: string;
@@ -205,9 +215,11 @@ export interface StealthCandidate {
   risk_penalty: number;
   evidence: string[];
   risks: string[];
-  metrics: Record<string, string | number | string[]>;
+  metrics: Record<string, unknown>;
   themes: string[];
   strategy_horizon: "短线" | "中长线" | "综合观察";
+  horizon_reason: string;
+  evidence_breakdown: StealthEvidenceItem[];
   pattern_tags: string[];
   information_tags: string[];
   observed: boolean;
