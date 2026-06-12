@@ -750,8 +750,8 @@ export function GuanlanDashboard() {
 
   if (activeView !== "stealth" && !state.dashboard && !state.agents && !state.error) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-paper">
-        <div className="flex items-center gap-3 rounded-lg border border-ink/10 bg-white px-5 py-4 text-sm text-muted shadow-soft">
+      <main className="app-shell flex min-h-screen items-center justify-center">
+        <div className="research-strip flex items-center gap-3 rounded-xl px-5 py-4 text-sm text-muted">
           <RefreshCcw className="animate-spin text-pine" size={18} />
           正在连接真实 A 股行情与 Agent 服务
         </div>
@@ -771,9 +771,9 @@ export function GuanlanDashboard() {
         onNavigate={navigate}
         onRefresh={() => void refresh()}
       />
-      <div className="ml-[112px] min-w-0 md:ml-[304px]">
+      <div className="relative z-10 ml-[112px] min-w-0 md:ml-[304px]">
         <TopBar dashboard={dashboard} marketError={state.error} onRefresh={() => void refresh()} />
-        <div className="mx-auto max-w-[1320px] px-4 py-5 lg:px-6">
+        <div className="mx-auto max-w-[1320px] px-4 py-5 lg:px-7">
           <ViewHeader item={activeItem} dashboard={dashboard} />
           <div className="mt-5">
             {activeView === "overview" && (dashboard ? <OverviewView dashboard={dashboard} /> : <MarketUnavailableNotice error={state.error} onRefresh={() => void refresh()} />)}
@@ -877,35 +877,40 @@ function TopBar({ dashboard, marketError, onRefresh }: { dashboard?: DashboardRe
   const asOf = source?.as_of ?? dashboard?.temperature.updated_at ?? new Date().toISOString();
 
   return (
-    <header className="border-b border-ink/10 bg-paper/90 backdrop-blur">
-      <div className="mx-auto flex max-w-[1500px] flex-col gap-3 px-4 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-pine text-white">
-            <Activity size={23} />
+    <header className="terminal-topbar">
+      <div className="mx-auto flex max-w-[1500px] flex-col gap-3 px-4 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-7">
+        <div className="flex items-center gap-4">
+          <div className="brand-mark shrink-0">
+            <span className="brand-word relative text-xl font-semibold">澜</span>
           </div>
-          <div>
-            <h1 className="text-xl font-semibold tracking-normal text-ink">观澜</h1>
-            <p className="text-xs text-muted">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="brand-word text-2xl font-semibold tracking-normal text-ink">观澜研究台</h1>
+              <span className="rounded-full border border-saffron/30 bg-saffron/10 px-2 py-0.5 text-[11px] font-semibold text-[#7b5424]">
+                PUBLIC DATA DESK
+              </span>
+            </div>
+            <p className="mt-1 max-w-3xl truncate text-xs text-muted">
               {dashboard?.disclaimer ?? "本产品仅做公开/授权信息整理和复盘辅助，不构成证券投资建议、收益承诺、目标价或交易指令。"}
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="inline-flex items-center gap-1 rounded-md border border-pine/20 bg-pine/10 px-3 py-2 text-pine">
+          <span className="status-chip border-pine/20 bg-pine/10 text-pine">
             <ShieldCheck size={15} />
             信息整理模式
           </span>
-          <span className="inline-flex items-center gap-1 rounded-md border border-signal/20 bg-signal/10 px-3 py-2 text-signal">
+          <span className="status-chip border-signal/20 bg-signal/10 text-signal">
             <Database size={15} />
             {source?.name ?? (marketError ? "实时行情暂不可用" : "真实行情源")}
           </span>
-          <span className="inline-flex items-center gap-1 rounded-md border border-ink/10 bg-white px-3 py-2 text-muted">
+          <span className="status-chip">
             <Clock3 size={15} />
             {formatDateTime(asOf)}
           </span>
           <button
             onClick={onRefresh}
-            className="inline-flex min-h-9 items-center gap-1 rounded-md border border-ink/10 bg-white px-3 text-muted transition hover:border-pine/30 hover:text-pine"
+            className="terminal-button inline-flex items-center gap-1 px-3 text-sm font-semibold transition"
             title="刷新真实行情"
           >
             <RefreshCcw size={15} />
@@ -933,15 +938,15 @@ function AppSidebar({
   const healthyAgents = agents?.agents.filter((agent) => agent.status === "healthy").length ?? 0;
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 flex w-[112px] flex-col border-r border-ink/10 bg-paper/95 md:w-[304px]">
-      <div className="flex h-full flex-col px-2 py-4 md:px-4 md:py-5">
-        <div className="flex items-center justify-center gap-3 border-b border-ink/10 pb-4 md:justify-start md:pb-5">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-pine text-white">
-            <Activity size={23} />
+    <aside className="terminal-sidebar fixed inset-y-0 left-0 z-30 flex w-[112px] flex-col md:w-[304px]">
+      <div className="relative z-10 flex h-full flex-col px-2 py-4 md:px-4 md:py-5">
+        <div className="flex items-center justify-center gap-3 border-b border-white/10 pb-4 md:justify-start md:pb-5">
+          <div className="brand-mark h-11 w-11 shrink-0">
+            <span className="brand-word relative text-xl font-semibold">澜</span>
           </div>
           <div className="hidden min-w-0 md:block">
-            <p className="truncate text-base font-semibold text-ink">观澜</p>
-            <p className="text-xs text-muted">真实 A 股行情视图</p>
+            <p className="brand-word truncate text-lg font-semibold text-white">观澜</p>
+            <p className="text-xs text-white/55">盘面复盘与证据链工作台</p>
           </div>
         </div>
 
@@ -952,13 +957,15 @@ function AppSidebar({
         </nav>
 
         <div className="mt-5 hidden space-y-3 md:block">
-          <div className="rounded-lg border border-ink/10 bg-white p-4">
+          <div className="sidebar-card rounded-xl p-4">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-xs text-muted">市场温度</span>
-              <span className="rounded-md bg-pine/10 px-2 py-1 text-xs font-semibold text-pine">{dashboard?.temperature.label ?? "未连接"}</span>
+              <span className="text-xs text-white/55">市场温度</span>
+              <span className="rounded-md border border-emerald-300/20 bg-emerald-300/10 px-2 py-1 text-xs font-semibold text-emerald-100">
+                {dashboard?.temperature.label ?? "未连接"}
+              </span>
             </div>
-            <p className="mt-2 text-4xl font-semibold text-ink">{dashboard?.temperature.score ?? "--"}</p>
-            <p className="mt-1 text-xs text-muted">
+            <p className="mt-2 text-4xl font-semibold text-white">{dashboard?.temperature.score ?? "--"}</p>
+            <p className="mt-1 text-xs text-white/55">
               上涨 {dashboard?.temperature.advancers ?? "--"} / 下跌 {dashboard?.temperature.decliners ?? "--"}
             </p>
           </div>
@@ -971,14 +978,14 @@ function AppSidebar({
           </div>
         </div>
 
-        <div className="mt-auto space-y-3 border-t border-ink/10 pt-4">
-          <div className="hidden items-start gap-2 rounded-lg border border-pine/20 bg-pine/10 p-3 text-xs leading-5 text-pine md:flex">
+        <div className="mt-auto space-y-3 border-t border-white/10 pt-4">
+          <div className="hidden items-start gap-2 rounded-xl border border-emerald-300/20 bg-emerald-300/10 p-3 text-xs leading-5 text-emerald-100 md:flex">
             <ShieldCheck className="mt-0.5 shrink-0" size={15} />
             <span>无本地假行情兜底；真实源不可用时页面会直接提示。</span>
           </div>
           <button
             onClick={onRefresh}
-            className="flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-pine"
+            className="terminal-button flex w-full items-center justify-center gap-2 px-3 text-sm font-semibold transition"
           >
             <RefreshCcw size={16} />
             <span className="hidden md:inline">刷新实时数据</span>
@@ -1002,7 +1009,7 @@ function SidebarGroup({
 }) {
   return (
     <div>
-      <p className="px-1 text-center text-[11px] font-semibold text-muted md:px-2 md:text-left md:text-xs">{title}</p>
+      <p className="px-1 text-center text-[11px] font-semibold text-white/40 md:px-2 md:text-left md:text-xs">{title}</p>
       <div className="mt-2 space-y-1">
         {items.map((item) => {
           const Icon = item.icon;
@@ -1011,14 +1018,16 @@ function SidebarGroup({
             <button
               key={item.id}
               onClick={() => onNavigate(item.id)}
-              className={`flex min-h-12 w-full flex-col items-center justify-center gap-1 rounded-md px-1 text-center transition md:flex-row md:justify-start md:gap-3 md:px-3 md:text-left ${
-                active ? "bg-pine text-white shadow-soft" : "text-muted hover:bg-pine/10 hover:text-pine"
+              className={`flex min-h-12 w-full flex-col items-center justify-center gap-1 rounded-lg border px-1 text-center transition md:flex-row md:justify-start md:gap-3 md:px-3 md:text-left ${
+                active
+                  ? "border-emerald-200/20 bg-white/10 text-white shadow-terminal"
+                  : "border-transparent text-white/60 hover:border-white/10 hover:bg-white/10 hover:text-white"
               }`}
             >
               <Icon size={18} />
               <span className="min-w-0">
                 <span className="block text-[11px] font-semibold leading-4 md:text-sm">{item.label}</span>
-                <span className={`hidden truncate text-xs md:block ${active ? "text-white/75" : "text-muted"}`}>{item.description}</span>
+                <span className={`hidden truncate text-xs md:block ${active ? "text-emerald-100/80" : "text-white/40"}`}>{item.description}</span>
               </span>
             </button>
           );
@@ -1030,16 +1039,16 @@ function SidebarGroup({
 
 function SidebarMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-ink/10 bg-white p-3">
-      <p className="text-xs text-muted">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-ink">{value}</p>
+    <div className="sidebar-card rounded-xl p-3">
+      <p className="text-xs text-white/45">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-white">{value}</p>
     </div>
   );
 }
 
 function MobileNav({ activeView, onNavigate }: { activeView: ViewId; onNavigate: (view: ViewId) => void }) {
   return (
-    <div className="sticky top-0 z-20 border-b border-ink/10 bg-paper/95 backdrop-blur md:hidden">
+    <div className="sticky top-0 z-20 border-b border-ink/10 bg-[#fffdf8]/90 backdrop-blur md:hidden">
       <nav className="no-scrollbar flex gap-2 overflow-x-auto px-4 py-3">
         {allNav.map((item) => {
           const Icon = item.icon;
@@ -1049,7 +1058,7 @@ function MobileNav({ activeView, onNavigate }: { activeView: ViewId; onNavigate:
               key={item.id}
               onClick={() => onNavigate(item.id)}
               className={`inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md border px-3 text-sm font-medium ${
-                active ? "border-pine bg-pine text-white" : "border-ink/10 bg-white text-muted"
+                active ? "border-pine bg-pine text-white" : "border-ink/10 bg-white/80 text-muted"
               }`}
             >
               <Icon size={16} />
@@ -1065,21 +1074,22 @@ function MobileNav({ activeView, onNavigate }: { activeView: ViewId; onNavigate:
 function ViewHeader({ item, dashboard }: { item: NavItem; dashboard?: DashboardResponse }) {
   const Icon = item.icon;
   return (
-    <section className="flex flex-col justify-between gap-4 rounded-lg border border-ink/10 bg-white px-5 py-4 md:flex-row md:items-center">
+    <section className="view-header flex flex-col justify-between gap-4 rounded-2xl px-5 py-4 md:flex-row md:items-center">
       <div className="flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-md bg-pine/10 text-pine">
+        <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-pine/20 bg-pine/10 text-pine">
           <Icon size={20} />
         </span>
         <div>
-          <h2 className="text-xl font-semibold text-ink">{item.label}</h2>
+          <p className="text-[11px] font-semibold uppercase text-saffron">Research Module</p>
+          <h2 className="brand-word text-2xl font-semibold text-ink">{item.label}</h2>
           <p className="text-sm text-muted">{item.description}</p>
         </div>
       </div>
       <div className="flex flex-wrap gap-2 text-xs">
-        <span className="rounded-md border border-ink/10 bg-paper px-2.5 py-1 text-muted">
+        <span className="status-chip min-h-8">
           {dashboard ? `更新 ${formatDateTime(dashboard.temperature.updated_at)}` : "行情未连接"}
         </span>
-        <span className="rounded-md border border-pine/20 bg-pine/10 px-2.5 py-1 text-pine">实时源 {dashboard?.sources.length ?? "--"}</span>
+        <span className="status-chip min-h-8 border-pine/20 bg-pine/10 text-pine">实时源 {dashboard?.sources.length ?? "--"}</span>
       </div>
     </section>
   );
