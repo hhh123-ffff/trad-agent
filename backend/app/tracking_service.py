@@ -57,7 +57,7 @@ def run_tracking_job(job_name: str) -> JobRun:
         raise KeyError(job_name)
 
     run = create_job_run(normalized, message=f"{JOB_SPECS[normalized]}已启动。")
-    lock_key = f"marketlens:job-lock:{normalized}"
+    lock_key = f"guanlan:job-lock:{normalized}"
     lock = _acquire_lock(lock_key)
     if not lock:
         return finish_job_run(run.id, "failed", message="同名任务正在运行，已跳过本次触发。", error="job locked")

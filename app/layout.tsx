@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata = {
   title: "观澜",
-  description: "A股盘前参考与盘后复盘 SaaS",
+  description: "A 股盘后复盘与公开信息候选观察工作台",
   manifest: "/manifest.json"
 };
 

@@ -149,7 +149,7 @@ function viewFromHash(): ViewId {
   return allNav.some((item) => item.id === hash) ? hash : "replay";
 }
 
-export function MarketLensDashboard() {
+export function GuanlanDashboard() {
   const [state, setState] = useState<LoadState>({});
   const [activeView, setActiveView] = useState<ViewId>(() => viewFromHash());
   const [selectedSymbol, setSelectedSymbol] = useState("");

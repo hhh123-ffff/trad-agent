@@ -18,7 +18,7 @@ def _install_requests_default_timeout(timeout_seconds: float) -> None:
     except Exception:
         return
     original_request = requests.sessions.Session.request
-    if getattr(original_request, "_marketlens_timeout_patch", False):
+    if getattr(original_request, "_guanlan_timeout_patch", False):
         return
 
     def request_with_default_timeout(self: Any, method: str, url: str, **kwargs: Any) -> Any:
@@ -26,7 +26,7 @@ def _install_requests_default_timeout(timeout_seconds: float) -> None:
             kwargs["timeout"] = timeout_seconds
         return original_request(self, method, url, **kwargs)
 
-    request_with_default_timeout._marketlens_timeout_patch = True  # type: ignore[attr-defined]
+    request_with_default_timeout._guanlan_timeout_patch = True  # type: ignore[attr-defined]
     requests.sessions.Session.request = request_with_default_timeout
 
 

@@ -1,5 +1,5 @@
-import { MarketLensDashboard } from "@/components/marketlens-dashboard";
+import { GuanlanDashboard } from "@/components/guanlan-dashboard";
 
 export default function Home() {
-  return <MarketLensDashboard />;
+  return <GuanlanDashboard />;
 }

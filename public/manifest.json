@@ -1,7 +1,7 @@
 {
   "name": "观澜",
   "short_name": "观澜",
-  "description": "A股盘前参考与盘后复盘 SaaS",
+  "description": "A 股盘后复盘与公开信息候选观察工作台",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f7f3ec",
