@@ -39,6 +39,8 @@ class SourceRef(BaseModel):
     as_of: datetime
     license: str = "unspecified"
     freshness: str
+    is_stale: bool = False
+    latest_error: str | None = None
 
 
 class MarketIndex(BaseModel):
@@ -244,6 +246,17 @@ class ComplianceCheck(BaseModel):
 
 
 StealthStage = Literal["潜伏观察", "启动确认", "过热排除", "数据不足"]
+StrategyHorizon = Literal["短线", "中长线", "综合观察"]
+EvidenceCategory = Literal["量价图形", "题材信息", "新闻公告", "风险提示", "数据质量"]
+EvidenceWeight = Literal["high", "medium", "low"]
+
+
+class StealthEvidenceItem(BaseModel):
+    category: EvidenceCategory
+    title: str
+    detail: str
+    weight: EvidenceWeight = "medium"
+    source_ids: list[str] = Field(default_factory=list)
 
 
 class StockUniverseItem(BaseModel):
@@ -288,6 +301,11 @@ class StealthCandidate(BaseModel):
     risks: list[str]
     metrics: dict[str, Any] = Field(default_factory=dict)
     themes: list[str] = Field(default_factory=list)
+    strategy_horizon: StrategyHorizon = "综合观察"
+    horizon_reason: str = ""
+    evidence_breakdown: list[StealthEvidenceItem] = Field(default_factory=list)
+    pattern_tags: list[str] = Field(default_factory=list)
+    information_tags: list[str] = Field(default_factory=list)
     observed: bool = False
     source_ids: list[str] = Field(default_factory=list)
     disclaimer: str = "仅供研究筛选和观察辅助，不构成投资建议。"
@@ -325,7 +343,10 @@ class StealthScanTask(BaseModel):
     requested_limit: int | None = None
     requested_offset: int = 0
     requested_symbols: list[str] = Field(default_factory=list)
+    requested_include_watchlist: bool = True
     active_themes: list[str] = Field(default_factory=list)
+    worker_id: str | None = None
+    lease_expires_at: datetime | None = None
     total: int = 0
     scanned: int = 0
     saved: int = 0

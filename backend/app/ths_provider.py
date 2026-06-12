@@ -148,8 +148,8 @@ class TonghuashunQuantApiClient:
             {
                 "codes": ",".join(normalized),
                 "functionpara": {"reportType": report_type or os.getenv("THS_ANNOUNCEMENT_REPORT_TYPE", "901")},
-                "beginrDate": begin.strftime("%Y-%m-%d"),
-                "endrDate": end.strftime("%Y-%m-%d"),
+                "beginDate": begin.strftime("%Y-%m-%d"),
+                "endDate": end.strftime("%Y-%m-%d"),
                 "outputpara": os.getenv(
                     "THS_ANNOUNCEMENT_OUTPUTPARA",
                     "reportDate:Y,thscode:Y,secName:Y,ctime:Y,reportTitle:Y,pdfURL:Y,seq:Y",

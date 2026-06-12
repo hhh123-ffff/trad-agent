@@ -191,7 +191,10 @@ def init_schema() -> None:
                 requested_limit INTEGER,
                 requested_offset INTEGER NOT NULL DEFAULT 0,
                 requested_symbols JSONB NOT NULL DEFAULT '[]'::jsonb,
+                requested_include_watchlist BOOLEAN NOT NULL DEFAULT TRUE,
                 active_themes JSONB NOT NULL DEFAULT '[]'::jsonb,
+                worker_id TEXT,
+                lease_expires_at TIMESTAMPTZ,
                 total INTEGER NOT NULL DEFAULT 0,
                 scanned INTEGER NOT NULL DEFAULT 0,
                 saved INTEGER NOT NULL DEFAULT 0,
@@ -207,6 +210,9 @@ def init_schema() -> None:
             """
         )
         conn.execute("ALTER TABLE stealth_scan_tasks ADD COLUMN IF NOT EXISTS requested_offset INTEGER NOT NULL DEFAULT 0;")
+        conn.execute("ALTER TABLE stealth_scan_tasks ADD COLUMN IF NOT EXISTS requested_include_watchlist BOOLEAN NOT NULL DEFAULT TRUE;")
+        conn.execute("ALTER TABLE stealth_scan_tasks ADD COLUMN IF NOT EXISTS worker_id TEXT;")
+        conn.execute("ALTER TABLE stealth_scan_tasks ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS stealth_scan_failures (

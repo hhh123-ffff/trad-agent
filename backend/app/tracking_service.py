@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime, timedelta
+from threading import Lock
 from typing import Callable
 
 from .data_providers import (
@@ -46,6 +47,8 @@ JOB_SPECS: dict[str, str] = {
 }
 
 REPORT_SECTION_TITLES = ["市场温度", "指数表现", "板块轮动", "盘中事件", "自选与观察池", "数据质量与缺口"]
+_LOCAL_JOB_LOCKS: dict[str, Lock] = {}
+_LOCAL_JOB_LOCKS_GUARD = Lock()
 
 
 def run_tracking_job(job_name: str) -> JobRun:
@@ -696,11 +699,21 @@ def _acquire_lock(lock_key: str) -> str | None:
         if get_redis().set(lock_key, token, nx=True, ex=60 * 20):
             return token
     except Exception:
-        return token
+        with _LOCAL_JOB_LOCKS_GUARD:
+            lock = _LOCAL_JOB_LOCKS.setdefault(lock_key, Lock())
+        if lock.acquire(blocking=False):
+            return f"local:{token}"
+        return None
     return None
 
 
 def _release_lock(lock_key: str, token: str) -> None:
+    if token.startswith("local:"):
+        with _LOCAL_JOB_LOCKS_GUARD:
+            lock = _LOCAL_JOB_LOCKS.get(lock_key)
+        if lock and lock.locked():
+            lock.release()
+        return
     try:
         redis = get_redis()
         if redis.get(lock_key) == token:

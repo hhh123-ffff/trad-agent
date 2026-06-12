@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
+from psycopg.types.json import Jsonb
 
 from backend.app import main as main_module
 from backend.app import repositories
@@ -10,6 +11,7 @@ from backend.app.database import connect
 from backend.app.main import app
 from backend.app.market_provider import live_source
 from backend.app.models import (
+    AssistantQuery,
     Confidence,
     DailyBar,
     EventType,
@@ -23,9 +25,10 @@ from backend.app.models import (
     StealthScanTask,
     StockUniverseItem,
     ThemeMembership,
+    WatchlistStock,
     WatchlistItemCreate,
 )
-from backend.app.stealth_repository import create_scan_task, record_scan_failure, save_daily_bars, save_scan_results
+from backend.app.stealth_repository import create_scan_task, list_candidates, record_scan_failure, save_daily_bars, save_scan_results
 from backend.app.stealth_scanner import evaluate_candidate
 
 
@@ -230,6 +233,34 @@ def test_assistant_answer_requires_citations_and_is_audited():
         assert any(item["query"] == query for item in history.json()["items"])
 
 
+def test_assistant_answer_handles_empty_sector_snapshot(monkeypatch):
+    now = datetime.now(timezone.utc)
+    source = live_source()
+    temperature = MarketTemperature(
+        score=48,
+        label="均衡",
+        advancers=2100,
+        decliners=2300,
+        limit_up_count=20,
+        limit_down_count=8,
+        total_turnover_billion=7600,
+        updated_at=now,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "current_market",
+        lambda: (temperature, [], [], [], [], source),
+    )
+    monkeypatch.setattr(main_module, "save_assistant_query", lambda *args, **kwargs: 1)
+
+    answer = main_module.assistant_query(AssistantQuery(query="复盘市场宽度和板块"))
+
+    assert answer.blocked_by_compliance is False
+    assert answer.citations[0].id == source.id
+    assert any("板块数据暂不可用" in item for item in answer.evidence)
+    assert "板块数据暂不可用" in answer.answer
+
+
 def test_compliance_blocks_investment_advice():
     with TestClient(app) as client:
         response = client.post("/api/assistant/query", json={"query": "600000.SH 今天可以买入吗，仓位多少？"})
@@ -237,6 +268,37 @@ def test_compliance_blocks_investment_advice():
     data = response.json()
     assert data["blocked_by_compliance"] is True
     assert "不能提供证券投资建议" in data["answer"]
+
+
+def test_watchlist_returns_persisted_items_when_market_snapshot_unavailable(monkeypatch):
+    source = live_source()
+    persisted = WatchlistStock(
+        symbol="600000.SH",
+        name="浦发银行",
+        group="观察池",
+        price=8.88,
+        change_pct=0,
+        volume_ratio=1,
+        tags=["银行"],
+        attention_reason="信息复盘候选",
+        latest_event="行情源暂不可用，保留持久化自选。",
+        risk_flags=[],
+        source_id=source.id,
+    )
+
+    def broken_market():
+        raise main_module.market_unavailable(RuntimeError("free source timeout"))
+
+    monkeypatch.setattr(main_module, "current_market", broken_market)
+    monkeypatch.setattr(main_module, "list_watchlist", lambda: [persisted])
+    monkeypatch.setattr(main_module, "watchlist_count_cache", lambda: None)
+
+    payload = main_module.watchlist()
+
+    assert payload["items"] == [persisted]
+    assert payload["cached_count"] == 1
+    assert payload["market_status"] == "unavailable"
+    assert "free source timeout" in payload["market_error"]
 
 
 def test_replay_uses_live_snapshot_section():
@@ -298,11 +360,87 @@ def test_stealth_scanner_identifies_launch_confirmation():
     assert candidate.evidence
 
 
+def test_stealth_scanner_labels_short_term_breakout_pattern():
+    symbol = "600892.SH"
+    candidate = evaluate_candidate(
+        StockUniverseItem(symbol=symbol, name="测试短线"),
+        _synthetic_bars(symbol, breakout=True),
+        themes=[ThemeMembership(symbol=symbol, theme_name="机器人", theme_type="concept")],
+        active_themes=["机器人"],
+    )
+
+    assert candidate.strategy_horizon == "短线"
+    assert "平台突破" in candidate.pattern_tags
+    assert "放量突破" in candidate.pattern_tags
+    assert "信息共振" in candidate.information_tags
+    assert candidate.horizon_reason.startswith("短线")
+    assert any(item.category == "量价图形" and "突破" in item.title for item in candidate.evidence_breakdown)
+    assert any(item.category == "题材信息" and item.weight in {"high", "medium"} for item in candidate.evidence_breakdown)
+
+
+def test_stealth_scanner_labels_mid_long_wave_pattern():
+    symbol = "600893.SH"
+    candidate = evaluate_candidate(
+        StockUniverseItem(symbol=symbol, name="测试波段"),
+        _synthetic_bars(symbol, breakout=False),
+        themes=[ThemeMembership(symbol=symbol, theme_name="半导体", theme_type="concept")],
+        active_themes=["半导体"],
+    )
+
+    assert candidate.strategy_horizon == "中长线"
+    assert "平台收敛" in candidate.pattern_tags
+    assert "均线修复" in candidate.pattern_tags
+    assert "题材共振" in candidate.information_tags
+    assert candidate.horizon_reason.startswith("中长线")
+    assert any(item.category == "量价图形" and "平台" in item.title for item in candidate.evidence_breakdown)
+    assert any(item.category == "题材信息" and "题材" in item.title for item in candidate.evidence_breakdown)
+
+
 def test_stealth_scanner_marks_insufficient_history():
     symbol = "600889.SH"
     candidate = evaluate_candidate(StockUniverseItem(symbol=symbol, name="测试不足"), _synthetic_bars(symbol, count=30))
     assert candidate.stage == "数据不足"
     assert candidate.risks
+    assert candidate.horizon_reason.startswith("综合观察")
+    assert any(item.category == "数据质量" for item in candidate.evidence_breakdown)
+
+
+def test_stealth_candidate_legacy_metrics_default_explanation_fields():
+    symbol = "600887.SH"
+    trading_day = date.today() - timedelta(days=3)
+    _delete_stealth_test_symbol(symbol)
+    try:
+        with connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO stealth_scan_results (
+                    trading_day, symbol, name, stage, total_score, accumulation_score,
+                    launch_score, theme_score, risk_penalty, evidence, risks, metrics, source_ids
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    trading_day,
+                    symbol,
+                    "旧数据候选",
+                    "潜伏观察",
+                    61,
+                    68,
+                    35,
+                    55,
+                    5,
+                    Jsonb(["旧版文本证据"]),
+                    Jsonb([]),
+                    Jsonb({}),
+                    Jsonb(["src-legacy"]),
+                ),
+            )
+
+        candidate = next(item for item in list_candidates(trading_day=trading_day, include_insufficient=True) if item.symbol == symbol)
+        assert candidate.horizon_reason == ""
+        assert candidate.evidence_breakdown == []
+    finally:
+        _delete_stealth_test_symbol(symbol)
 
 
 def test_stealth_candidate_api_and_observation_flow():
@@ -328,6 +466,8 @@ def test_stealth_candidate_api_and_observation_flow():
             assert detail.status_code == 200
             assert detail.json()["candidate"]["symbol"] == symbol
             assert detail.json()["bars"]
+            assert detail.json()["candidate"]["horizon_reason"]
+            assert detail.json()["candidate"]["evidence_breakdown"]
 
             observed = client.post(
                 f"/api/stealth/observe/{symbol}",

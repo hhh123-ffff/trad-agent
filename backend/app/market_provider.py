@@ -618,7 +618,7 @@ def build_live_preopen(
 ) -> PreopenBrief:
     now = datetime.now(CN_TZ)
     source_ref = source or live_source()
-    top_sector = sectors[0]
+    top_sector = sectors[0] if sectors else None
     watched = watchlist[:3]
     return PreopenBrief(
         generated_at=now,
@@ -651,6 +651,14 @@ def build_live_preopen(
                 impact_scope=[top_sector.name],
                 source_ids=[source_ref.id],
             )
+        ] if top_sector else [
+            BriefItem(
+                title="板块排序暂不可用",
+                detail="免费行情源本次未返回可用板块数据，盘前参考仅保留市场宽度和自选股信息。",
+                importance="low",
+                impact_scope=["数据缺口"],
+                source_ids=[source_ref.id],
+            )
         ],
         risk_events=[
             BriefItem(
@@ -674,17 +682,23 @@ def build_live_replay(
 ) -> ReplayReport:
     now = datetime.now(CN_TZ)
     source_ref = source or live_source()
-    top_sector = sectors[0]
+    top_sector = sectors[0] if sectors else None
+    sector_headline = f"{top_sector.name}板块当前排序靠前" if top_sector else "板块数据暂不可用"
+    sector_summary = (
+        f"{top_sector.name}板块涨跌幅 {top_sector.change_pct:+.2f}%，当前复盘仅基于实时行情源。"
+        if top_sector
+        else "免费行情源本次未返回可用板块数据，当前复盘仅基于市场宽度和事件回放。"
+    )
     return ReplayReport(
         trading_day=now.strftime("%Y-%m-%d"),
         generated_at=now,
-        headline=f"实时复盘：市场温度 {temperature.score}，{top_sector.name}板块当前排序靠前。",
+        headline=f"实时复盘：市场温度 {temperature.score}，{sector_headline}。",
         market_summary=f"上涨 {temperature.advancers} 家，下跌 {temperature.decliners} 家，成交额约 {temperature.total_turnover_billion:.0f} 亿。",
         sections=[
             ReplaySection(
                 window="实时快照",
                 title="市场宽度与板块排序",
-                summary=f"{top_sector.name}板块涨跌幅 {top_sector.change_pct:+.2f}%，当前复盘仅基于实时行情源。",
+                summary=sector_summary,
                 missed_signals=events,
                 source_ids=[source_ref.id],
             )
