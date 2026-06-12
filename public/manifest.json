@@ -1,6 +1,6 @@
 {
-  "name": "MarketLens 盘面助手",
-  "short_name": "MarketLens",
+  "name": "观澜",
+  "short_name": "观澜",
   "description": "A股盘前参考与盘后复盘 SaaS",
   "start_url": "/",
   "display": "standalone",

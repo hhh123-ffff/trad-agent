@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata = {
-  title: "MarketLens 盘面助手",
+  title: "观澜",
   description: "A股盘前参考与盘后复盘 SaaS",
   manifest: "/manifest.json"
 };

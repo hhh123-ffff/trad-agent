@@ -1,1 +1,1 @@
-"""MarketLens backend package."""
+"""Guanlan backend package."""

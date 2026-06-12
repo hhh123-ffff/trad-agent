@@ -1,6 +1,17 @@
-# MarketLens 盘面助手
+# 观澜
 
-A股盘后复盘与信息驱动候选挖掘 SaaS 的可运行实现。当前版本包含 FastAPI 后端、Next.js Web/PWA 前端、Docker PostgreSQL/Redis、免费公开行情/新闻/公告源接入、Agent 状态、合规拦截、盘前 Brief、盘中 Radar、盘后 Replay、自选股中心和基于引用的 AI 问答。产品定位是整理公开信息、复盘盘面和筛选观察候选，不提供买卖、仓位、目标价或收益承诺。
+观澜取“观其波澜，辨其来势”之意，是面向 A 股盘后复盘与公开信息候选挖掘的研究工作台，原项目名为 MarketLens。当前版本包含 FastAPI 后端、Next.js Web/PWA 前端、Docker PostgreSQL/Redis、免费公开行情/新闻/公告源接入、Agent 状态、合规拦截、盘前 Brief、盘中 Radar、盘后 Replay、自选股中心和基于引用的 AI 问答。产品定位是整理公开信息、复盘盘面和筛选观察候选，不提供买卖、仓位、目标价或收益承诺。
+
+## 最近合并：观澜候选证据链
+
+`main` 已合入 PR #1“观澜：免费复盘源与候选证据链”，重点变化如下：
+
+- 默认本地数据栈切到免费公开源：东方财富/新浪实时行情、AKShare 历史 K 线/题材、AKShare 新闻公告。
+- 盘后复盘闭环新增后台扫描任务、PostgreSQL lease、自选股兜底和数据源状态。
+- 潜伏候选详情新增短线/中长线原因与分类证据解释，让候选出现的依据更容易审计。
+- 仓库治理新增中文 PR 模板、CI 状态检查和 `main` 分支保护说明。
+
+当前配置项仍沿用 `MARKETLENS_` 前缀，避免破坏已有本地环境和部署脚本；后续如果要彻底改为 `GUANLAN_`，建议单独开迁移 PR。
 
 ## 本地运行
 
@@ -103,7 +114,7 @@ MARKETLENS_INFO_PROVIDER=akshare
 
 免费源覆盖东方财富/新浪实时行情、AKShare 历史 K 线/题材、AKShare 东方财富个股新闻和沪深京公告。它们适合个人复盘和研究筛选；商用前仍需确认数据来源许可、访问频率和稳定性。
 
-MarketLens 可以优先使用同花顺/iFinD 采集市场快照、历史 K 线、股票池和公告：
+观澜可以优先使用同花顺/iFinD 采集市场快照、历史 K 线、股票池和公告：
 
 ```bash
 MARKETLENS_MARKET_PROVIDER=ths

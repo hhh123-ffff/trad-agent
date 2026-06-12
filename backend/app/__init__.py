@@ -1,1 +1,1 @@
-"""FastAPI application modules for MarketLens."""
+"""FastAPI application modules for Guanlan."""

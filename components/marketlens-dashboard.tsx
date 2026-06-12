@@ -884,7 +884,7 @@ function TopBar({ dashboard, marketError, onRefresh }: { dashboard?: DashboardRe
             <Activity size={23} />
           </div>
           <div>
-            <h1 className="text-xl font-semibold tracking-normal text-ink">MarketLens 盘面助手</h1>
+            <h1 className="text-xl font-semibold tracking-normal text-ink">观澜</h1>
             <p className="text-xs text-muted">
               {dashboard?.disclaimer ?? "本产品仅做公开/授权信息整理和复盘辅助，不构成证券投资建议、收益承诺、目标价或交易指令。"}
             </p>
@@ -940,7 +940,7 @@ function AppSidebar({
             <Activity size={23} />
           </div>
           <div className="hidden min-w-0 md:block">
-            <p className="truncate text-base font-semibold text-ink">MarketLens</p>
+            <p className="truncate text-base font-semibold text-ink">观澜</p>
             <p className="text-xs text-muted">真实 A 股行情视图</p>
           </div>
         </div>

@@ -114,7 +114,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="MarketLens API",
+    title="观澜 API",
     version="0.2.0",
     description="A-share pre-open reference and post-market replay SaaS API.",
     lifespan=lifespan,
