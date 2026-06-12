@@ -1,13 +1,14 @@
 # MarketLens 盘面助手
 
-A股盘前参考与盘后复盘 SaaS 的可运行实现。当前版本包含 FastAPI 后端、Next.js Web/PWA 前端、Docker PostgreSQL/Redis、真实行情源接入、Agent 状态、合规拦截、盘前 Brief、盘中 Radar、盘后 Replay、自选股中心和基于引用的 AI 问答。
+A股盘后复盘与信息驱动候选挖掘 SaaS 的可运行实现。当前版本包含 FastAPI 后端、Next.js Web/PWA 前端、Docker PostgreSQL/Redis、免费公开行情/新闻/公告源接入、Agent 状态、合规拦截、盘前 Brief、盘中 Radar、盘后 Replay、自选股中心和基于引用的 AI 问答。产品定位是整理公开信息、复盘盘面和筛选观察候选，不提供买卖、仓位、目标价或收益承诺。
 
 ## Run locally
 
 ```bash
 npm install
 npm run db:up
-python -m pip install -r backend/requirements.txt
+python -m pip install -r backend/requirements.lock
+npm run db:migrate
 npm run api
 npm run dev
 ```
@@ -15,6 +16,8 @@ npm run dev
 Open `http://127.0.0.1:3000`.
 
 API docs are available at `http://127.0.0.1:8000/docs`.
+
+Use `backend/requirements.lock` for reproducible local and CI environments. `backend/requirements.txt` is the smaller direct-dependency list to edit when intentionally refreshing the lock.
 
 ## Tonghuashun local replay loop
 
@@ -76,9 +79,29 @@ npm run build
 - PostgreSQL on `127.0.0.1:5432`, database `qrant_agent`
 - Redis on `127.0.0.1:6380` to avoid clashing with other local Redis instances
 
+If another local project already owns `5432`, start the services on a different host port and keep `DATABASE_URL` in sync:
+
+```bash
+MARKETLENS_POSTGRES_PORT=15432 npm run db:up
+DATABASE_URL=postgresql://qrant:qrant_dev@127.0.0.1:15432/qrant_agent npm run db:migrate
+DATABASE_URL=postgresql://qrant:qrant_dev@127.0.0.1:15432/qrant_agent npm run api
+```
+
 The API initializes tables on startup but does not seed demo market data. Dashboard, brief, radar, replay, stock profile, and assistant answers are built from live market responses; when the live source is unavailable, the API returns `503` instead of falling back to local fake data. Watchlist CRUD, source metadata, and assistant audit logs are persisted in PostgreSQL. Redis is used for lightweight runtime cache such as watchlist counts.
 
+Schema changes live in `backend/migrations/*.sql` and can be applied with `npm run db:migrate`. The API still keeps idempotent startup initialization for local convenience, but new production schema changes should go through SQL migrations.
+
 ## Tonghuashun/iFinD data source
+
+默认本地开发使用免费公开源：
+
+```bash
+MARKETLENS_MARKET_PROVIDER=free
+MARKETLENS_HISTORY_PROVIDER=akshare
+MARKETLENS_INFO_PROVIDER=akshare
+```
+
+免费源覆盖东方财富/新浪实时行情、AKShare 历史 K 线/题材、AKShare 东方财富个股新闻和沪深京公告。它们适合个人复盘和研究筛选；商用前仍需确认数据来源许可、访问频率和稳定性。
 
 MarketLens can run Tonghuashun/iFinD first for market snapshots, historical K-lines, stock universe, and announcement collection:
 
@@ -145,6 +168,7 @@ The `#stealth` page adds a research-only candidate scanner for “潜伏观察 /
   - `DELETE /api/stealth/observe/{symbol}`
 - P0 task flow:
   - the page creates a task instead of waiting for a full-market scan;
+  - tasks persist request parameters, include-watchlist mode, worker id, and a lease expiry so multiple app instances claim work through PostgreSQL instead of trusting only process-local memory;
   - the task records queued/running/completed/failed status, total/scanned/saved/failed counts, stage counts, message, error, and timestamps;
   - completed tasks persist daily bars, theme memberships, scan results, and an auditable evidence chain.
 - Scoring:

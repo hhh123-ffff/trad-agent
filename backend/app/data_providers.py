@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import os
-from datetime import datetime, time
+from datetime import date, datetime, time
 from typing import Any, Protocol
 
 import requests
 
 from .history_provider import HistoryDataUnavailable, akshare_source, fetch_daily_bars, fetch_stock_universe, fetch_theme_memberships, fetch_weekly_bars
+from .history_provider import _ak as akshare_client
 from .market_provider import CN_TZ, live_market_bundle
 from .market_provider import (
     build_market_events,
@@ -318,6 +319,111 @@ class DevNewsAnnouncementProvider:
         return []
 
 
+def akshare_information_source() -> SourceRef:
+    return SourceRef(
+        id="src-akshare-info",
+        name="AKShare 东方财富新闻公告",
+        url="https://akshare.akfamily.xyz/",
+        as_of=datetime.now(CN_TZ),
+        license="public-free-source",
+        freshness="东方财富个股新闻和沪深京 A 股公告；免费公开源，适合复盘和研究筛选",
+    )
+
+
+class AkshareNewsAnnouncementProvider:
+    name = "akshare-eastmoney-info"
+    source_id = "src-akshare-info"
+
+    def __init__(self, ak_client: Any | None = None, today: date | None = None):
+        self.ak_client = ak_client
+        self.today = today
+
+    def news(self, symbols: list[str] | None = None) -> list[NewsItem]:
+        wanted = _symbol_codes(symbols)
+        if not wanted:
+            return []
+        now = datetime.now(CN_TZ)
+        items: list[NewsItem] = []
+        ak = self._ak()
+        for code in sorted(wanted):
+            normalized = _normalize_free_symbol(code)
+            try:
+                frame = ak.stock_news_em(symbol=code)
+            except Exception as exc:
+                raise RuntimeError(f"AKShare stock_news_em failed for {code}: {exc}") from exc
+            if frame is None or getattr(frame, "empty", True):
+                continue
+            for row in frame.to_dict("records"):
+                title = _first_text(row, "新闻标题", "title", "标题")
+                if not title:
+                    continue
+                summary = _first_text(row, "新闻内容", "summary", "摘要", "内容")
+                published_at = _parse_datetime(_first_text(row, "发布时间", "datetime", "time", "日期"), fallback=now)
+                items.append(
+                    NewsItem(
+                        id=_stable_id("akshare-news", normalized, title, published_at.isoformat()),
+                        symbol=normalized,
+                        title=title[:300],
+                        summary=(summary or title)[:800],
+                        published_at=published_at,
+                        source_url=_first_text(row, "新闻链接", "url", "链接"),
+                        source_name=_first_text(row, "文章来源", "source", "来源") or "东方财富",
+                        event_type="news",
+                        importance="medium",
+                        provider=self.name,
+                        source_id=self.source_id,
+                        license_note="AKShare 东方财富个股新闻公开接口，仅保存标题摘要和链接",
+                    )
+                )
+        return _dedupe_by_id(items)[:300]
+
+    def announcements(self, symbols: list[str] | None = None) -> list[AnnouncementItem]:
+        wanted = _symbol_codes(symbols)
+        target_day = self.today or datetime.now(CN_TZ).date()
+        try:
+            frame = self._ak().stock_notice_report(symbol="全部", date=target_day.strftime("%Y%m%d"))
+        except Exception as exc:
+            raise RuntimeError(f"AKShare stock_notice_report failed: {exc}") from exc
+        if frame is None or getattr(frame, "empty", True):
+            return []
+        items: list[AnnouncementItem] = []
+        for row in frame.to_dict("records"):
+            code = _plain_code(_first_text(row, "代码", "symbol", "证券代码"))
+            if not code:
+                continue
+            if wanted and code not in wanted:
+                continue
+            title = _first_text(row, "公告标题", "title", "标题")
+            if not title:
+                continue
+            normalized = _normalize_free_symbol(code)
+            published_at = _parse_datetime(
+                _first_text(row, "公告日期", "datetime", "date", "日期"),
+                fallback=datetime.combine(target_day, time(16), CN_TZ),
+            )
+            name = _first_text(row, "名称", "name", "证券简称")
+            items.append(
+                AnnouncementItem(
+                    id=_stable_id("akshare-announcement", normalized, title, published_at.isoformat()),
+                    symbol=normalized,
+                    title=title[:300],
+                    summary=(f"{name}：{title}" if name else title)[:800],
+                    published_at=published_at,
+                    source_url=_first_text(row, "网址", "url", "链接"),
+                    source_name="东方财富公告大全",
+                    event_type="announcement",
+                    importance=_announcement_importance(title),
+                    provider=self.name,
+                    source_id=self.source_id,
+                    license_note="AKShare 东方财富公告公开接口，仅保存标题、摘要、日期和链接",
+                )
+            )
+        return _dedupe_by_id(items)[:500]
+
+    def _ak(self) -> Any:
+        return self.ak_client or akshare_client()
+
+
 class TonghuashunNewsAnnouncementProvider:
     name = "ths-quantapi-info"
 
@@ -473,6 +579,17 @@ def _plain_code(symbol: str | None) -> str:
     return (symbol or "").upper().replace(".SH", "").replace(".SZ", "").replace(".BJ", "")
 
 
+def _normalize_free_symbol(symbol: str | None) -> str:
+    code = _plain_code(symbol)
+    if not code:
+        return ""
+    if code.startswith(("5", "6", "9")):
+        return f"{code}.SH"
+    if code.startswith(("4", "8")):
+        return f"{code}.BJ"
+    return f"{code}.SZ"
+
+
 def _normalize_tushare_symbol(symbol: str | None) -> str | None:
     raw = (symbol or "").strip().upper()
     if not raw:
@@ -494,8 +611,12 @@ def _match_symbol(text: str, wanted_codes: set[str]) -> str | None:
     return None
 
 
-def _parse_datetime(raw: str, fallback: datetime) -> datetime:
-    value = raw.strip()
+def _parse_datetime(raw: object, fallback: datetime) -> datetime:
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=CN_TZ)
+    if isinstance(raw, date):
+        return datetime.combine(raw, time(16), CN_TZ)
+    value = str(raw or "").strip()
     if not value:
         return fallback
     for fmt in ("%Y%m%d", "%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
@@ -522,8 +643,17 @@ def _announcement_importance(title: str) -> str:
     return "high" if any(term in title for term in high_terms) else "medium"
 
 
+def _dedupe_by_id(items: list[Any]) -> list[Any]:
+    result: dict[str, Any] = {}
+    for item in items:
+        result[getattr(item, "id")] = item
+    return list(result.values())
+
+
 def build_news_announcement_provider() -> NewsAnnouncementProvider:
-    provider = os.getenv("MARKETLENS_INFO_PROVIDER", "dev").strip().lower()
+    provider = os.getenv("MARKETLENS_INFO_PROVIDER", "akshare").strip().lower()
+    if provider in {"", "dev", "free", "akshare", "eastmoney", "public"}:
+        return AkshareNewsAnnouncementProvider()
     if provider in {"ths", "ths_quantapi", "tonghuashun", "ifind"}:
         return TonghuashunNewsAnnouncementProvider()
     if provider == "tushare":
@@ -532,14 +662,14 @@ def build_news_announcement_provider() -> NewsAnnouncementProvider:
 
 
 def build_market_data_provider() -> MarketDataProvider:
-    provider = os.getenv("MARKETLENS_MARKET_PROVIDER", "dev").strip().lower()
+    provider = os.getenv("MARKETLENS_MARKET_PROVIDER", "free").strip().lower()
     if provider in {"ths", "ths_delayed", "ths_quantapi", "tonghuashun", "ifind"}:
         return TonghuashunMarketDataProvider()
     return DevMarketDataProvider()
 
 
 def build_history_data_provider() -> HistoryDataProvider:
-    provider = os.getenv("MARKETLENS_HISTORY_PROVIDER", "dev").strip().lower()
+    provider = os.getenv("MARKETLENS_HISTORY_PROVIDER", "akshare").strip().lower()
     if provider in {"ths", "ths_delayed", "ths_quantapi", "tonghuashun", "ifind"}:
         return TonghuashunDelayedHistoryProvider()
     return DevHistoryDataProvider()
@@ -563,6 +693,8 @@ def market_provider_sources() -> list[SourceRef]:
 
 
 def information_provider_sources() -> list[SourceRef]:
+    if isinstance(news_announcement_provider, AkshareNewsAnnouncementProvider):
+        return [akshare_information_source()]
     if isinstance(news_announcement_provider, TonghuashunNewsAnnouncementProvider):
         return [ths_announcement_source()]
     return []
@@ -578,6 +710,8 @@ def source_ref_for_id(source_id: str) -> SourceRef:
         return sina_source()
     if source_id == "src-ths-quantapi-announcement":
         return ths_announcement_source()
+    if source_id == "src-akshare-info":
+        return akshare_information_source()
     return ths_market_source() if source_id.startswith("src-ths-") else live_source()
 
 
@@ -599,9 +733,9 @@ def data_source_statuses() -> list[DataSourceStatus]:
     credential_value = "configured" if ths_token_configured else "needs_token"
     credential_next_step = "" if ths_token_configured else "Set THS_REFRESH_TOKEN or THS_ACCESS_TOKEN to enable Tonghuashun iFinD QuantAPI."
 
-    market_provider = os.getenv("MARKETLENS_MARKET_PROVIDER", "dev").strip().lower()
-    history_provider = os.getenv("MARKETLENS_HISTORY_PROVIDER", "dev").strip().lower()
-    info_provider = os.getenv("MARKETLENS_INFO_PROVIDER", "dev").strip().lower()
+    market_provider = os.getenv("MARKETLENS_MARKET_PROVIDER", "free").strip().lower()
+    history_provider = os.getenv("MARKETLENS_HISTORY_PROVIDER", "akshare").strip().lower()
+    info_provider = os.getenv("MARKETLENS_INFO_PROVIDER", "akshare").strip().lower()
     ths_market_providers = {"ths", "ths_delayed", "ths_quantapi", "tonghuashun", "ifind"}
     ths_history_providers = {"ths", "ths_delayed", "ths_quantapi", "tonghuashun", "ifind"}
     ths_info_providers = {"ths", "ths_quantapi", "tonghuashun", "ifind"}
@@ -622,6 +756,28 @@ def data_source_statuses() -> list[DataSourceStatus]:
             )
         )
 
+    if market_provider in {"", "dev", "free", "eastmoney", "sina", "public"}:
+        statuses.append(
+            DataSourceStatus(
+                id="src-eastmoney-live",
+                name="东方财富实时行情",
+                provider="free-eastmoney",
+                status="configured",
+                capabilities={"quotes": "configured", "indexes": "configured", "ranked_groups": "configured"},
+                next_step="免费公开行情源已启用；生产商业化前请确认来源许可和访问频率。",
+            )
+        )
+        statuses.append(
+            DataSourceStatus(
+                id="src-sina-live",
+                name="新浪财经备用行情",
+                provider="free-sina",
+                status="fallback",
+                capabilities={"quotes": "fallback", "indexes": "fallback"},
+                next_step="东方财富不可用时作为免费备用源。",
+            )
+        )
+
     if history_provider in ths_history_providers:
         theme_memberships = "fallback" if os.getenv("THS_THEME_FALLBACK_TO_AKSHARE", "1").strip() != "0" else "not_enabled"
         statuses.append(
@@ -639,6 +795,18 @@ def data_source_statuses() -> list[DataSourceStatus]:
             )
         )
 
+    if history_provider in {"", "dev", "free", "akshare", "eastmoney", "public"}:
+        statuses.append(
+            DataSourceStatus(
+                id="src-akshare-dev",
+                name="AKShare 历史行情和题材",
+                provider="free-akshare",
+                status="configured",
+                capabilities={"history_bars": "configured", "stock_universe": "configured", "theme_memberships": "configured"},
+                next_step="免费 AKShare 历史行情和题材源已启用；适合复盘和研究筛选。",
+            )
+        )
+
     if info_provider in ths_info_providers:
         statuses.append(
             DataSourceStatus(
@@ -651,6 +819,18 @@ def data_source_statuses() -> list[DataSourceStatus]:
                     "news": "not_enabled",
                 },
                 next_step=credential_next_step,
+            )
+        )
+
+    if info_provider in {"", "dev", "free", "akshare", "eastmoney", "public"}:
+        statuses.append(
+            DataSourceStatus(
+                id="src-akshare-info",
+                name="AKShare 东方财富新闻公告",
+                provider="free-akshare-eastmoney-info",
+                status="configured",
+                capabilities={"news": "configured", "announcements": "configured"},
+                next_step="免费公开新闻/公告源已启用；仅用于复盘和候选挖掘，不输出交易建议。",
             )
         )
 

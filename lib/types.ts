@@ -8,6 +8,8 @@ export interface SourceRef {
   as_of: string;
   license: string;
   freshness: string;
+  is_stale: boolean;
+  latest_error: string | null;
 }
 
 export interface DataSourceStatus {
@@ -78,6 +80,8 @@ export interface WatchlistResponse {
   limit: number;
   tier: string;
   cached_count: number | null;
+  market_status: "live" | "unavailable";
+  market_error: string;
   disclaimer: string;
 }
 
@@ -201,8 +205,11 @@ export interface StealthCandidate {
   risk_penalty: number;
   evidence: string[];
   risks: string[];
-  metrics: Record<string, string | number>;
+  metrics: Record<string, string | number | string[]>;
   themes: string[];
+  strategy_horizon: "短线" | "中长线" | "综合观察";
+  pattern_tags: string[];
+  information_tags: string[];
   observed: boolean;
   source_ids: string[];
   disclaimer: string;

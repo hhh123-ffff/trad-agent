@@ -28,6 +28,7 @@ from .market_provider import (
     build_live_replay,
     live_source,
 )
+from .migrations import run_migrations
 from .models import (
     AgentStatusResponse,
     AnnouncementItem,
@@ -88,7 +89,7 @@ from .stealth_repository import (
     observe_symbol,
     snapshot_observation_journal,
 )
-from .stealth_tasks import enqueue_failed_symbols_retry, enqueue_stealth_scan_task
+from .stealth_tasks import enqueue_failed_symbols_retry, enqueue_stealth_scan_task, resume_queued_stealth_scan_tasks
 from .tracking_repository import list_announcement_items, list_market_events, list_market_snapshots, list_news_items
 from .tracking_scheduler import start_scheduler, stop_scheduler
 from .tracking_service import JOB_SPECS, build_information_summary, recent_job_runs, run_tracking_job, tracking_daily_report
@@ -104,7 +105,9 @@ _market_cache_lock = Lock()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     ensure_storage()
+    run_migrations()
     mark_unfinished_scan_tasks_failed()
+    resume_queued_stealth_scan_tasks()
     start_scheduler()
     yield
     stop_scheduler()
@@ -156,7 +159,15 @@ def current_market():
             return _market_cache
         except Exception as exc:
             if _market_cache is not None and now - _market_cache_at <= MARKET_STALE_TTL_SECONDS:
-                return _market_cache
+                temperature, indexes, sectors, watchlist, events, source = _market_cache
+                return (
+                    temperature,
+                    indexes,
+                    sectors,
+                    watchlist,
+                    events,
+                    source.model_copy(update={"is_stale": True, "latest_error": str(exc)}),
+                )
             raise market_unavailable(exc) from exc
 
 
@@ -237,13 +248,22 @@ def replay() -> ReplayReport:
 
 @app.get("/api/watchlist")
 def watchlist() -> dict[str, object]:
-    _, _, _, items, _, _ = current_market()
+    market_status = "live"
+    market_error = ""
+    try:
+        _, _, _, items, _, _ = current_market()
+    except HTTPException as exc:
+        market_status = "unavailable"
+        market_error = str(exc.detail)
+        items = list_watchlist()
     cached_count = watchlist_count_cache()
     return {
         "items": items,
         "limit": 50,
         "tier": "pro",
         "cached_count": int(cached_count) if cached_count is not None else len(items),
+        "market_status": market_status,
+        "market_error": market_error,
         "disclaimer": DISCLAIMER,
     }
 
@@ -535,20 +555,28 @@ def assistant_query(payload: AssistantQuery) -> AssistantAnswer:
         return answer
 
     temperature, _, sectors, watchlist, events, source = current_market()
-    top_sector = sectors[0]
+    top_sector = sectors[0] if sectors else None
     evidence = [
         f"上涨 {temperature.advancers} 家，下跌 {temperature.decliners} 家",
-        f"{top_sector.name}板块涨跌幅 {top_sector.change_pct:+.2f}%",
         f"实时事件数 {len(events)}",
     ]
+    if top_sector:
+        evidence.append(f"{top_sector.name}板块涨跌幅 {top_sector.change_pct:+.2f}%")
+    else:
+        evidence.append("板块数据暂不可用，当前回答仅基于市场宽度和事件数。")
     if watchlist:
         first = watchlist[0]
         evidence.append(f"自选股 {first.symbol} 最新涨跌幅 {first.change_pct:+.2f}%")
+    sector_text = (
+        f"{top_sector.name}板块当前排序靠前，涨跌幅 {top_sector.change_pct:+.2f}%。"
+        if top_sector
+        else "板块数据暂不可用。"
+    )
     answer = AssistantAnswer(
         answer=(
             f"基于实时 A 股行情：当前市场温度 {temperature.score}，"
             f"上涨 {temperature.advancers} 家、下跌 {temperature.decliners} 家；"
-            f"{top_sector.name}板块当前排序靠前，涨跌幅 {top_sector.change_pct:+.2f}%。"
+            f"{sector_text}"
             "以上只是不含本地假数据的实时信息整理，不构成投资建议。"
         ),
         citations=[source],

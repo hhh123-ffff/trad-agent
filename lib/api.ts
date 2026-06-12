@@ -40,7 +40,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let detail = "";
     try {
       const payload = (await response.json()) as { detail?: unknown };
-      detail = typeof payload.detail === "string" ? `：${payload.detail}` : "";
       detail = typeof payload.detail === "string" ? `: ${payload.detail}` : detail;
     } catch {
       detail = "";

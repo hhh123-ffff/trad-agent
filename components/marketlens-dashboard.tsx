@@ -1771,7 +1771,10 @@ function StealthPanel({
                     </button>
                   </td>
                   <td>
-                    <StageBadge stage={candidate.stage} />
+                    <div className="flex flex-wrap gap-1.5">
+                      <StageBadge stage={candidate.stage} />
+                      <HorizonBadge horizon={candidate.strategy_horizon} />
+                    </div>
                   </td>
                   <td>
                     <ScoreBadge value={candidate.total_score} />
@@ -1817,6 +1820,7 @@ function StealthPanel({
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <StageBadge stage={activeCandidate.stage} />
+                  <HorizonBadge horizon={activeCandidate.strategy_horizon} />
                   <button
                     onClick={() => onToggleObserve(activeCandidate)}
                     className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
@@ -1870,6 +1874,11 @@ function StealthPanel({
                 ))}
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
+                {[...activeCandidate.pattern_tags, ...activeCandidate.information_tags].slice(0, 8).map((tag) => (
+                  <span key={tag} className="rounded-md border border-pine/20 bg-pine/10 px-2 py-1 text-xs text-pine">
+                    {tag}
+                  </span>
+                ))}
                 {activeCandidate.themes.map((theme) => (
                   <span key={theme} className="rounded-md border border-signal/20 bg-signal/10 px-2 py-1 text-xs text-signal">
                     {theme}
@@ -1911,6 +1920,16 @@ function StageBadge({ stage }: { stage: StealthCandidate["stage"] }) {
           ? "border-danger/25 bg-danger/10 text-danger"
           : "border-ink/10 bg-paper text-muted";
   return <span className={`rounded-md border px-2 py-1 text-xs font-semibold ${tone}`}>{stage}</span>;
+}
+
+function HorizonBadge({ horizon }: { horizon: StealthCandidate["strategy_horizon"] }) {
+  const tone =
+    horizon === "短线"
+      ? "border-saffron/35 bg-saffron/10 text-[#8a5a12]"
+      : horizon === "中长线"
+        ? "border-pine/25 bg-pine/10 text-pine"
+        : "border-ink/10 bg-paper text-muted";
+  return <span className={`rounded-md border px-2 py-1 text-xs font-semibold ${tone}`}>{horizon}</span>;
 }
 
 function journalBucketTone(bucketKey: ObservationJournalEntry["bucket_key"]) {

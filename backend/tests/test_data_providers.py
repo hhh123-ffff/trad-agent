@@ -1,8 +1,10 @@
 from datetime import date
 
 from backend.app.data_providers import (
+    AkshareNewsAnnouncementProvider,
     TonghuashunDelayedHistoryProvider,
     TushareNewsAnnouncementProvider,
+    build_news_announcement_provider,
     data_source_statuses,
     history_provider_sources,
 )
@@ -20,6 +22,90 @@ class _FakeResponse:
 
     def json(self):
         return self.payload
+
+
+def test_default_information_provider_uses_free_akshare(monkeypatch):
+    monkeypatch.delenv("MARKETLENS_INFO_PROVIDER", raising=False)
+
+    provider = build_news_announcement_provider()
+
+    assert isinstance(provider, AkshareNewsAnnouncementProvider)
+
+
+def test_akshare_information_provider_maps_news_and_announcements():
+    import pandas as pd
+
+    class FakeAkshare:
+        def stock_news_em(self, symbol):
+            assert symbol == "600000"
+            return pd.DataFrame(
+                [
+                    {
+                        "新闻标题": "浦发银行获得人工智能业务合作",
+                        "新闻内容": "公司公告引发市场关注",
+                        "发布时间": "2026-06-01 09:30:00",
+                        "文章来源": "东方财富",
+                        "新闻链接": "https://example.com/news",
+                    },
+                    {
+                        "新闻标题": "",
+                        "新闻内容": "空标题应跳过",
+                        "发布时间": "2026-06-01 09:31:00",
+                    },
+                ]
+            )
+
+        def stock_notice_report(self, symbol, date):
+            assert symbol == "全部"
+            assert date == "20260601"
+            return pd.DataFrame(
+                [
+                    {
+                        "代码": "600000",
+                        "名称": "浦发银行",
+                        "公告标题": "浦发银行关于重大事项的公告",
+                        "公告类型": "重大事项",
+                        "公告日期": "2026-06-01",
+                        "网址": "https://example.com/announcement",
+                    },
+                    {
+                        "代码": "000001",
+                        "名称": "平安银行",
+                        "公告标题": "平安银行普通公告",
+                        "公告类型": "其他",
+                        "公告日期": "2026-06-01",
+                        "网址": "https://example.com/other",
+                    },
+                ]
+            )
+
+    provider = AkshareNewsAnnouncementProvider(ak_client=FakeAkshare(), today=date(2026, 6, 1))
+
+    news = provider.news(["600000.SH"])
+    announcements = provider.announcements(["600000.SH"])
+
+    assert len(news) == 1
+    assert news[0].symbol == "600000.SH"
+    assert news[0].source_id == "src-akshare-info"
+    assert news[0].provider == "akshare-eastmoney-info"
+    assert news[0].source_url == "https://example.com/news"
+    assert len(announcements) == 1
+    assert announcements[0].symbol == "600000.SH"
+    assert announcements[0].importance == "high"
+    assert announcements[0].source_id == "src-akshare-info"
+
+
+def test_free_akshare_information_source_status_is_configured(monkeypatch):
+    monkeypatch.setenv("MARKETLENS_INFO_PROVIDER", "akshare")
+
+    statuses = {status.id: status for status in data_source_statuses()}
+
+    assert statuses["src-akshare-info"].status == "configured"
+    assert statuses["src-akshare-info"].capabilities == {
+        "news": "configured",
+        "announcements": "configured",
+    }
+    assert "免费" in statuses["src-akshare-info"].next_step
 
 
 def test_tushare_announcement_provider_maps_announcements(monkeypatch):
@@ -168,7 +254,10 @@ def test_tonghuashun_quantapi_client_maps_realtime_quotes(monkeypatch):
 
 
 def test_tonghuashun_quantapi_client_maps_announcements(monkeypatch):
+    calls = []
+
     def fake_post(url, json=None, headers=None, timeout=None):
+        calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
         if url.endswith("/get_access_token"):
             return _FakeResponse({"errorcode": 0, "data": {"access_token": "access-token"}})
         assert url.endswith("/report_query")
@@ -199,6 +288,8 @@ def test_tonghuashun_quantapi_client_maps_announcements(monkeypatch):
     assert items[0].symbol == "600000.SH"
     assert items[0].importance == "high"
     assert items[0].source_id == "src-ths-quantapi-announcement"
+    assert calls[1]["json"]["beginDate"] == "2026-05-31"
+    assert calls[1]["json"]["endDate"] == "2026-05-31"
 
 
 def test_tonghuashun_history_provider_falls_back_to_akshare():

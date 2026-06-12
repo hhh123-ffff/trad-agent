@@ -174,15 +174,17 @@ def create_scan_task(
     requested_offset: int,
     requested_symbols: list[str],
     active_themes: list[str],
+    requested_include_watchlist: bool = True,
 ) -> StealthScanTask:
     task_id = uuid4().hex
     with connect() as conn:
         row = conn.execute(
             """
             INSERT INTO stealth_scan_tasks (
-                id, status, requested_limit, requested_offset, requested_symbols, active_themes, message
+                id, status, requested_limit, requested_offset, requested_symbols,
+                requested_include_watchlist, active_themes, message
             )
-            VALUES (%s, 'queued', %s, %s, %s, %s, %s)
+            VALUES (%s, 'queued', %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
             (
@@ -190,11 +192,35 @@ def create_scan_task(
                 requested_limit,
                 requested_offset,
                 _json(requested_symbols),
+                requested_include_watchlist,
                 _json(active_themes),
                 "扫描任务已排队，等待后台执行。",
             ),
         ).fetchone()
     return _scan_task_from_row(row)
+
+
+def claim_scan_task(task_id: str, worker_id: str, lease_seconds: int = 7200) -> StealthScanTask | None:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            UPDATE stealth_scan_tasks
+            SET status = 'running',
+                worker_id = %s,
+                lease_expires_at = NOW() + (%s || ' seconds')::interval,
+                started_at = COALESCE(started_at, NOW()),
+                updated_at = NOW(),
+                message = '后台扫描已领取，正在执行。'
+            WHERE id = %s
+              AND (
+                    status = 'queued'
+                    OR (status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < NOW())
+                  )
+            RETURNING *
+            """,
+            (worker_id, lease_seconds, task_id),
+        ).fetchone()
+    return _scan_task_from_row(row) if row else None
 
 
 def update_scan_task(
@@ -241,6 +267,8 @@ def update_scan_task(
         assignments.append("started_at = COALESCE(started_at, NOW())")
     if finished:
         assignments.append("finished_at = NOW()")
+        assignments.append("worker_id = NULL")
+        assignments.append("lease_expires_at = NULL")
     values.append(task_id)
     with connect() as conn:
         row = conn.execute(
@@ -347,6 +375,21 @@ def latest_scan_task() -> StealthScanTask | None:
     with connect() as conn:
         row = conn.execute("SELECT * FROM stealth_scan_tasks ORDER BY created_at DESC LIMIT 1").fetchone()
     return _scan_task_from_row(row) if row else None
+
+
+def list_queued_scan_tasks(limit: int = 10) -> list[StealthScanTask]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM stealth_scan_tasks
+            WHERE status = 'queued'
+            ORDER BY created_at ASC
+            LIMIT %s
+            """,
+            (limit,),
+        ).fetchall()
+    return [_scan_task_from_row(row) for row in rows]
 
 
 def list_recent_scan_tasks(limit: int = 6) -> list[StealthScanTask]:
@@ -512,8 +555,10 @@ def mark_unfinished_scan_tasks_failed() -> None:
                 error = COALESCE(error, '服务重启，未完成的扫描任务已停止。'),
                 message = '服务重启，未完成的扫描任务已停止。',
                 finished_at = COALESCE(finished_at, NOW()),
+                worker_id = NULL,
+                lease_expires_at = NULL,
                 updated_at = NOW()
-            WHERE status IN ('queued', 'running')
+            WHERE status = 'running'
             """
         )
 
@@ -929,6 +974,7 @@ def _observation_journal_from_row(row: dict[str, Any]) -> ObservationJournalEntr
 
 
 def _candidate_from_row(row: dict[str, Any]) -> StealthCandidate:
+    metrics = row["metrics"] or {}
     return StealthCandidate(
         trading_day=row["trading_day"],
         symbol=row["symbol"],
@@ -941,8 +987,11 @@ def _candidate_from_row(row: dict[str, Any]) -> StealthCandidate:
         risk_penalty=float(row["risk_penalty"]),
         evidence=row["evidence"] or [],
         risks=row["risks"] or [],
-        metrics=row["metrics"] or {},
+        metrics=metrics,
         themes=list(row["themes"] or []),
+        strategy_horizon=str(metrics.get("strategy_horizon") or "综合观察"),
+        pattern_tags=list(metrics.get("pattern_tags") or []),
+        information_tags=list(metrics.get("information_tags") or []),
         observed=bool(row["observed"]),
         source_ids=row["source_ids"] or ["src-akshare-dev"],
     )
@@ -1005,7 +1054,10 @@ def _scan_task_from_row(row: dict[str, Any]) -> StealthScanTask:
         requested_limit=row["requested_limit"],
         requested_offset=int(row.get("requested_offset") or 0),
         requested_symbols=list(row["requested_symbols"] or []),
+        requested_include_watchlist=bool(row.get("requested_include_watchlist", True)),
         active_themes=list(row["active_themes"] or []),
+        worker_id=row.get("worker_id"),
+        lease_expires_at=row.get("lease_expires_at"),
         total=int(row["total"] or 0),
         scanned=int(row["scanned"] or 0),
         saved=int(row["saved"] or 0),

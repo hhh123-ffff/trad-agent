@@ -40,6 +40,8 @@ export function CandidateFunnel({
 
   const sourcedCandidates = candidates.filter((candidate) => candidate.source_ids.length > 0).length;
   const exclusionCount = stageCounts.risk + stageCounts.data_gap;
+  const shortTermCount = candidates.filter((candidate) => candidate.strategy_horizon === "短线").length;
+  const midLongCount = candidates.filter((candidate) => candidate.strategy_horizon === "中长线").length;
   const cards: FunnelCard[] = [
     {
       key: "data",
@@ -77,7 +79,7 @@ export function CandidateFunnel({
       key: "pool",
       title: "观察池",
       value: observationSummary?.total ?? candidates.filter((candidate) => candidate.observed).length,
-      detail: observationSummary?.updated_at ? `更新 ${formatDateTime(observationSummary.updated_at)}` : "当前观察候选",
+      detail: `短线 ${shortTermCount} 只，中长线 ${midLongCount} 只`,
       icon: Users,
       tone: "border-saffron/35 bg-saffron/10 text-[#8a5a12]"
     }
@@ -141,15 +143,4 @@ function classifyStage(stage: string): StageBucket {
 
 function includesAny(value: string, patterns: string[]) {
   return patterns.some((pattern) => value.includes(pattern));
-}
-
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Shanghai"
-  }).format(new Date(value));
 }

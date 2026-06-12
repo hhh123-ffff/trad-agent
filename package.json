@@ -12,6 +12,7 @@
     "smoke:replay:scan": "python tools/post_market_replay_smoke.py --scan",
     "test:api": "pytest backend/tests -q",
     "db:up": "docker compose up -d postgres redis",
+    "db:migrate": "python -m backend.app.migrations",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres redis"
   },

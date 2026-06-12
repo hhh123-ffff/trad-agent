@@ -61,6 +61,40 @@ def test_post_market_replay_job_continues_when_information_source_fails(monkeypa
     assert "部分完成" in message
 
 
+def test_tracking_job_lock_uses_local_mutex_when_redis_unavailable(monkeypatch):
+    class BrokenRedis:
+        def set(self, *args, **kwargs):
+            raise RuntimeError("redis unavailable")
+
+        def get(self, key):
+            raise RuntimeError("redis unavailable")
+
+        def delete(self, key):
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(tracking_service, "get_redis", lambda: BrokenRedis())
+    lock_key = "marketlens:test-lock:redis-down"
+
+    first = tracking_service._acquire_lock(lock_key)
+    second = tracking_service._acquire_lock(lock_key)
+
+    try:
+        assert first is not None
+        assert first.startswith("local:")
+        assert second is None
+    finally:
+        if first:
+            tracking_service._release_lock(lock_key, first)
+
+    third = tracking_service._acquire_lock(lock_key)
+    try:
+        assert third is not None
+        assert third.startswith("local:")
+    finally:
+        if third:
+            tracking_service._release_lock(lock_key, third)
+
+
 def test_post_market_replay_job_runs_bounded_close_loop(monkeypatch):
     calls: list[str] = []
     captured_at = datetime(2026, 6, 1, 20, 10, tzinfo=timezone.utc)

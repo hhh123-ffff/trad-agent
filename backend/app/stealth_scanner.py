@@ -43,6 +43,8 @@ def evaluate_candidate(
     theme_names = sorted({theme.theme_name for theme in themes or []})
     evidence: list[str] = []
     risks: list[str] = []
+    pattern_tags: list[str] = []
+    information_tags: list[str] = []
     metrics: dict[str, float | str | int] = {}
 
     if item.is_st or "ST" in item.name.upper():
@@ -82,9 +84,11 @@ def evaluate_candidate(
     accumulation = 0.0
     if range120 <= 35:
         accumulation += 22
+        pattern_tags.append("平台收敛")
         evidence.append(f"120日区间振幅约 {range120:.1f}%，长周期波动收敛。")
     if range60 <= 25:
         accumulation += 18
+        pattern_tags.append("平台收敛")
         evidence.append(f"60日区间振幅约 {range60:.1f}%，平台结构较紧。")
     if vol20 < vol60 * 0.85:
         accumulation += 15
@@ -99,37 +103,47 @@ def evaluate_candidate(
         accumulation += 10
     if last_close >= ma60:
         accumulation += 10
+        pattern_tags.append("均线修复")
         evidence.append("收盘价重新站在60日均线之上。")
     if last_close >= ma120:
         accumulation += 5
+        pattern_tags.append("均线修复")
 
     launch = 0.0
     if last_close >= prior60_high * 0.995:
         launch += 28
+        pattern_tags.append("平台突破")
         evidence.append("收盘价接近或突破60日平台高点。")
     if last_close >= prior120_high * 0.995:
         launch += 18
+        pattern_tags.append("平台突破")
         evidence.append("收盘价接近或突破120日压力区。")
     if amount_ratio20 >= 1.8:
         launch += 24
+        pattern_tags.append("放量突破")
         evidence.append(f"当日成交额约为20日均额 {amount_ratio20:.1f} 倍，出现启动量能。")
     elif amount_ratio20 >= 1.35:
         launch += 12
+        pattern_tags.append("放量突破")
         evidence.append(f"当日成交额约为20日均额 {amount_ratio20:.1f} 倍，量能开始改善。")
     if ma5 >= ma10 >= ma20:
         launch += 15
+        pattern_tags.append("短均多头")
         evidence.append("5/10/20日均线短期多头改善。")
     if 2 <= last_change <= 9.5:
         launch += 10
+        pattern_tags.append("强势阳线")
         evidence.append(f"当日涨跌幅 {last_change:.2f}%，有启动表现但未到极端状态。")
 
     active = {theme for theme in active_themes or []}
     theme_score = 0.0
     if theme_names:
         theme_score += 35
+        information_tags.append("题材归属")
         evidence.append("已识别题材/概念归属：" + "、".join(theme_names[:4]) + "。")
     if active.intersection(theme_names):
         theme_score += 35
+        information_tags.extend(["题材共振", "信息共振"])
         evidence.append("所属题材与当日活跃方向出现共振：" + "、".join(sorted(active.intersection(theme_names))[:3]) + "。")
     if last_change > 0:
         theme_score += 15
@@ -166,6 +180,18 @@ def evaluate_candidate(
         stage = "数据不足"
         risks.append(f"未达到观察阈值：潜伏 {accumulation:.0f}，启动 {launch:.0f}，题材 {theme_score:.0f}。")
 
+    pattern_tags = _unique(pattern_tags)
+    information_tags = _unique(information_tags)
+    strategy_horizon = _strategy_horizon(
+        accumulation=accumulation,
+        launch=launch,
+        risk_penalty=risk_penalty,
+        amount_ratio20=amount_ratio20,
+        last_change=last_change,
+        pattern_tags=pattern_tags,
+        information_tags=information_tags,
+    )
+
     metrics.update(
         {
             "range_60d_pct": round(range60, 2),
@@ -179,9 +205,29 @@ def evaluate_candidate(
             "ma60": round(ma60, 3),
             "ma120": round(ma120, 3),
             "weekly_bars": len(weekly_bars or []),
+            "strategy_horizon": strategy_horizon,
+            "pattern_tags": pattern_tags,
+            "information_tags": information_tags,
         }
     )
-    return _candidate(item, trading_day, stage, total, accumulation, launch, theme_score, risk_penalty, evidence, risks, metrics, theme_names, source_ids)
+    return _candidate(
+        item,
+        trading_day,
+        stage,
+        total,
+        accumulation,
+        launch,
+        theme_score,
+        risk_penalty,
+        evidence,
+        risks,
+        metrics,
+        theme_names,
+        source_ids,
+        strategy_horizon=strategy_horizon,
+        pattern_tags=pattern_tags,
+        information_tags=information_tags,
+    )
 
 
 def _candidate(
@@ -198,6 +244,9 @@ def _candidate(
     metrics: dict[str, object],
     themes: list[str],
     source_ids: Sequence[str] | None = None,
+    strategy_horizon: str = "综合观察",
+    pattern_tags: list[str] | None = None,
+    information_tags: list[str] | None = None,
 ) -> StealthCandidate:
     return StealthCandidate(
         trading_day=trading_day,
@@ -213,8 +262,40 @@ def _candidate(
         risks=risks[:8],
         metrics=metrics,
         themes=themes[:8],
+        strategy_horizon=strategy_horizon,  # type: ignore[arg-type]
+        pattern_tags=list(pattern_tags or [])[:8],
+        information_tags=list(information_tags or [])[:8],
         source_ids=list(source_ids or ["src-akshare-dev"]),
     )
+
+
+def _unique(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value and value not in result:
+            result.append(value)
+    return result
+
+
+def _strategy_horizon(
+    *,
+    accumulation: float,
+    launch: float,
+    risk_penalty: float,
+    amount_ratio20: float,
+    last_change: float,
+    pattern_tags: list[str],
+    information_tags: list[str],
+) -> str:
+    if risk_penalty >= 35 and launch >= 60:
+        return "短线"
+    if launch >= 65 and amount_ratio20 >= 1.35 and ("平台突破" in pattern_tags or "强势阳线" in pattern_tags):
+        return "短线"
+    if last_change >= 2 and "信息共振" in information_tags and "放量突破" in pattern_tags:
+        return "短线"
+    if accumulation >= 65 and ("平台收敛" in pattern_tags or "均线修复" in pattern_tags):
+        return "中长线"
+    return "综合观察"
 
 
 def run_stealth_scan(

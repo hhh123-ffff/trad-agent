@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import socket
 from threading import Lock
+from uuid import uuid4
 
 from .models import StealthScanRunRequest, StealthScanTask
 from .stealth_repository import (
+    claim_scan_task,
     create_scan_task,
     get_scan_task,
     increment_scan_failure_retry_count,
+    list_queued_scan_tasks,
     list_scan_failures,
     mark_symbol_scan_failures_resolved,
     record_scan_failure,
@@ -19,6 +23,7 @@ from .stealth_scanner import run_stealth_scan
 
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stealth-scan")
 _submit_lock = Lock()
+_WORKER_ID = f"{socket.gethostname()}:{uuid4().hex[:10]}"
 
 
 def enqueue_stealth_scan_task(request: StealthScanRunRequest, active_themes: list[str], include_watchlist: bool = True) -> StealthScanTask:
@@ -28,9 +33,10 @@ def enqueue_stealth_scan_task(request: StealthScanRunRequest, active_themes: lis
         requested_offset=request.offset,
         requested_symbols=symbols,
         active_themes=active_themes,
+        requested_include_watchlist=include_watchlist,
     )
     with _submit_lock:
-        _executor.submit(_run_task, task.id, request.limit, request.offset, symbols, active_themes, include_watchlist)
+        _executor.submit(_run_task_from_queue, task.id, _WORKER_ID)
     return task
 
 
@@ -44,7 +50,23 @@ def enqueue_failed_symbols_retry(task_id: str, active_themes: list[str]) -> Stea
     return enqueue_stealth_scan_task(request, active_themes, include_watchlist=False)
 
 
-def _run_task(task_id: str, limit: int | None, offset: int, symbols: list[str], active_themes: list[str], include_watchlist: bool) -> None:
+def resume_queued_stealth_scan_tasks(limit: int = 5) -> int:
+    queued = list_queued_scan_tasks(limit=limit)
+    with _submit_lock:
+        for task in queued:
+            _executor.submit(_run_task_from_queue, task.id, _WORKER_ID)
+    return len(queued)
+
+
+def _run_task_from_queue(task_id: str, worker_id: str = _WORKER_ID) -> None:
+    task = claim_scan_task(task_id, worker_id=worker_id)
+    if task is None:
+        return
+    _run_claimed_task(task)
+
+
+def _run_claimed_task(task: StealthScanTask) -> None:
+    task_id = task.id
     update_scan_task(
         task_id,
         status="running",
@@ -77,18 +99,18 @@ def _run_task(task_id: str, limit: int | None, offset: int, symbols: list[str], 
 
     try:
         result = run_stealth_scan(
-            limit=limit,
-            offset=offset,
-            symbols=symbols,
-            active_themes=active_themes,
+            limit=task.requested_limit,
+            offset=task.requested_offset,
+            symbols=task.requested_symbols,
+            active_themes=task.active_themes,
             progress=progress,
             failure=failure,
             success=success,
-            include_watchlist=include_watchlist,
+            include_watchlist=task.requested_include_watchlist,
         )
         journal_message = ""
         try:
-            snapshot_symbols = symbols if symbols else None
+            snapshot_symbols = task.requested_symbols if task.requested_symbols else None
             journal_entries = snapshot_observation_journal(symbols=snapshot_symbols)
             if journal_entries:
                 journal_message = f" 已记录观察日志 {len(journal_entries)} 条。"
