@@ -1,26 +1,26 @@
-## Summary
+## 变更摘要
 
 - 
 - 
 - 
 
-## Validation
+## 验证
 
 - [ ] `python -m pytest backend/tests -q`
 - [ ] `python -m compileall -q backend tools`
 - [ ] `npm run build`
-- [ ] Browser smoke check, when the change touches visible UI
+- [ ] 改动涉及可见 UI 时，完成浏览器冒烟检查
 
-## Data Sources
+## 数据源影响
 
-- [ ] Free/public sources remain the default local stack unless this PR intentionally changes provider configuration.
-- [ ] Source freshness and failure states are visible to users when live data is unavailable.
+- [ ] 除非本 PR 明确调整数据源配置，否则本地默认仍使用免费/公开源。
+- [ ] 当实时数据不可用时，用户能看到数据新鲜度和失败状态。
 
-## Compliance Boundary
+## 合规边界
 
-- [ ] Output remains information organization and replay support only.
-- [ ] No buy/sell instructions, target prices, position sizing, account actions, or guaranteed-return language.
+- [ ] 输出只用于信息整理和复盘辅助。
+- [ ] 不包含买卖指令、目标价、仓位建议、账户操作或收益承诺。
 
-## Notes
+## 备注
 
 -

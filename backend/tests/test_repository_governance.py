@@ -11,13 +11,13 @@ def test_repository_governance_docs_cover_pr_and_branch_protection():
     pr_text = pr_template.read_text(encoding="utf-8")
     branch_text = branch_protection.read_text(encoding="utf-8")
 
-    assert "## Summary" in pr_text
-    assert "## Validation" in pr_text
-    assert "## Compliance Boundary" in pr_text
+    assert "## 变更摘要" in pr_text
+    assert "## 验证" in pr_text
+    assert "## 合规边界" in pr_text
     assert "python -m pytest backend/tests -q" in pr_text
     assert "npm run build" in pr_text
 
-    assert "Require a pull request before merging" in branch_text
-    assert "Require status checks to pass before merging" in branch_text
-    assert "Backend and frontend checks" in branch_text
-    assert "Block force pushes" in branch_text
+    assert "合并前必须创建 Pull Request" in branch_text
+    assert "合并前必须通过状态检查" in branch_text
+    assert "后端与前端检查" in branch_text
+    assert "禁止强制推送" in branch_text

@@ -1,44 +1,44 @@
-# Branch Protection
+# 分支保护
 
-Use this checklist to protect `main` after the CI workflow has run at least once.
+在 CI workflow 至少成功运行一次后，用这份清单保护 `main` 分支。
 
-## Recommended Rule
+## 推荐规则
 
-Create a branch rule or ruleset targeting:
+创建分支规则或 ruleset，目标分支为：
 
 ```text
 main
 ```
 
-Enable:
+启用以下限制：
 
-- Require a pull request before merging
-- Require status checks to pass before merging
-- Require branches to be up to date before merging
-- Block force pushes
-- Block deletions
+- 合并前必须创建 Pull Request
+- 合并前必须通过状态检查
+- 合并前分支必须与目标分支保持最新
+- 禁止强制推送
+- 禁止删除分支
 
-## Required Status Check
+## 必需状态检查
 
-Select the GitHub Actions check created by `.github/workflows/ci.yml`:
-
-```text
-Backend and frontend checks
-```
-
-Depending on GitHub UI wording, it may appear as:
+选择 `.github/workflows/ci.yml` 创建的 GitHub Actions 检查：
 
 ```text
-CI / Backend and frontend checks
+后端与前端检查
 ```
 
-## Merge Discipline
+根据 GitHub 页面展示方式，它也可能显示为：
 
-Before merging product changes, confirm the PR has:
+```text
+CI / 后端与前端检查
+```
 
-- backend tests passing;
-- Python compile check passing;
-- frontend production build passing;
-- a short explanation of data-source and compliance impact.
+## 合并纪律
 
-For this product, PRs must preserve the boundary that MarketLens is a replay and information-organization tool. It must not become a trade execution, buy/sell recommendation, target-price, position-sizing, or guaranteed-return product.
+合并产品改动前，确认 PR 已完成：
+
+- 后端测试通过；
+- Python 编译检查通过；
+- 前端生产构建通过；
+- 简要说明数据源影响和合规边界影响。
+
+本产品必须保持边界：MarketLens 是复盘和信息整理工具，不能变成交易执行、买卖推荐、目标价、仓位建议或收益承诺产品。
